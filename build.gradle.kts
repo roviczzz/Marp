@@ -29,8 +29,15 @@ tasks {
         // Your plugin's jar (or shadowJar if present) will be used automatically.
         minecraftVersion("1.21.10")
         jvmArgs("-Xms2G", "-Xmx2G", "-Dcom.mojang.eula.agree=true")
-        if (providers.gradleProperty("marpSelfTest").isPresent) {
+        val selfTest = providers.gradleProperty("marpSelfTest").isPresent
+        if (selfTest) {
             jvmArgs("-Dmarp.selftest=true", "-Dmarp.selftest.autostop=true")
+        } else if (file("../LetItRoll/run").exists()) {
+            runDirectory.set(file("../LetItRoll/run"))
+        }
+        if (gradle.includedBuilds.any { it.name == "LetItRoll" }) {
+            dependsOn(gradle.includedBuild("LetItRoll").task(":jar"))
+            pluginJars(file("../LetItRoll/build/libs/LetItRoll-${project.version}.jar"))
         }
     }
 

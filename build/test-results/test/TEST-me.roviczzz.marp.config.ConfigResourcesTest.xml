@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="me.roviczzz.marp.config.ConfigResourcesTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.251Z" hostname="ROVIC" time="0.01">
-  <properties/>
-  <testcase name="configHasEveryDocumentedSection()" classname="me.roviczzz.marp.config.ConfigResourcesTest" time="0.003"/>
-  <testcase name="messagesDefineEveryKeyReferencedByCode()" classname="me.roviczzz.marp.config.ConfigResourcesTest" time="0.005"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

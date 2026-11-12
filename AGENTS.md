@@ -1,23 +1,23 @@
 # Marp — Agent Notes
 
-Marp is a Paper 1.21.10 home/warp plugin. It lives in `Marp/` inside the LetItRoll repo but is an **independent Gradle build** (its own `settings.gradle.kts`). The root `AGENTS.md` and root `openspec/` describe LetItRoll; they do not apply here.
+Marp is a Paper 1.21.10 home/warp plugin in its own repository (`C:\Users\rovic\IdeaProjects\Marp`), developed alongside `../LetItRoll` via Gradle `includeBuild` and shared `runServer` (`pluginJars`).
 
 ## Where to start
 
 - Read `DESIGN.md` before coding. It is the contract for architecture, commands, permissions, schema, GUI slot maps, and teleport semantics.
 - Current state: v0.1 implemented (`Marp.java`, SQLite storage, services, caches, teleport pipeline, GUI menus, commands, listeners, and JUnit 5 test suite).
-- Do not edit LetItRoll source to make Marp work. The projects share only the repo and the Gradle wrapper.
+- Do not edit LetItRoll source to make Marp work.
 
 ## Verified commands
 
-Run from the repo root (`Marp/` has no `gradlew`/wrapper jar):
+Run from `Marp/`:
 
-- `.\gradlew.bat -p Marp compileJava`
-- `.\gradlew.bat -p Marp build` -> `Marp/build/libs/Marp-1.0-SNAPSHOT-all.jar` (the Shadow `-all` jar is the default distributable output and includes the SQLite JDBC driver)
-- `.\gradlew.bat -p Marp test`
-- `.\gradlew.bat -p Marp runServer`
+- `.\gradlew.bat compileJava`
+- `.\gradlew.bat build` -> `build/libs/Marp-1.0-SNAPSHOT-all.jar` (the Shadow `-all` jar is the default distributable output and includes the SQLite JDBC driver)
+- `.\gradlew.bat test`
+- `.\gradlew.bat runServer` (shares `../LetItRoll/run` when present and wires `LetItRoll` via `pluginJars`; pass `-PmarpSelfTest=true` for an isolated automated self-test run in `Marp/run`)
 
-Or from `Marp/`: `..\gradlew.bat <task>`. System `gradle` is not available. Append `--no-configuration-cache` if the Gradle configuration cache breaks.
+System `gradle` is not available. Append `--no-configuration-cache` if the Gradle configuration cache breaks.
 
 ## Build facts
 
