@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="me.roviczzz.marp.model.PaginationTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.372Z" hostname="ROVIC" time="0.005">
+  <properties/>
+  <testcase name="deletingTheLastEntryOnAPageStepsBack()" classname="me.roviczzz.marp.model.PaginationTest" time="0.001"/>
+  <testcase name="singleEntryAndFullPageStayOnOnePage()" classname="me.roviczzz.marp.model.PaginationTest" time="0.001"/>
+  <testcase name="outOfRangePageIsClamped()" classname="me.roviczzz.marp.model.PaginationTest" time="0.0"/>
+  <testcase name="emptyListStillHasPageOne()" classname="me.roviczzz.marp.model.PaginationTest" time="0.0"/>
+  <testcase name="oneOverPageSizeAddsASecondPage()" classname="me.roviczzz.marp.model.PaginationTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

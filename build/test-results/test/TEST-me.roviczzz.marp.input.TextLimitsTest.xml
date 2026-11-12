@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="me.roviczzz.marp.input.TextLimitsTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.306Z" hostname="ROVIC" time="0.013">
+  <properties/>
+  <testcase name="loreEnforcesLineCountVisibleLengthAndRawLength()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.003"/>
+  <testcase name="iconEnforcesMaterialAnd16KiBCap()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.002"/>
+  <testcase name="displayNameEnforcesVisibleAndRawLengthBoundaries()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.002"/>
+  <testcase name="storedDisplayValueThatNoLongerParsesFallsBackToIdentifier()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.0"/>
+  <testcase name="chatTextInputCapturesCancelAndAppliesInput()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.002"/>
+  <testcase name="menuListenerDebounceAndSupportedClickTypes()" classname="me.roviczzz.marp.input.TextLimitsTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

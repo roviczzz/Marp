@@ -1,0 +1,132 @@
+name: Marp
+version: '1.0-SNAPSHOT'
+description: Homes, warps, and safe teleports for Paper servers.
+authors: [roviczzz]
+main: me.roviczzz.marp.Marp
+api-version: '1.21.10'
+load: POSTWORLD
+folia-supported: false
+
+commands:
+  sethome:
+    description: Set a home at your current location
+    usage: /sethome [name]
+  home:
+    description: Teleport to one of your homes
+    usage: /home [name]
+  delhome:
+    description: Delete one of your homes
+    usage: /delhome [name]
+  homes:
+    description: Open the homes menu
+    usage: /homes
+  setwarp:
+    description: Create or move a server warp
+    usage: /setwarp <name>
+  warp:
+    description: Teleport to a warp
+    usage: /warp [name]
+  delwarp:
+    description: Delete a server warp
+    usage: /delwarp <name>
+  warps:
+    description: Open the warps menu
+    usage: /warps
+  back:
+    description: Return to your last death or teleport point
+    usage: /back
+  marp:
+    description: Marp administration
+    usage: /marp <reload|cancel|info>
+    aliases: [marpadmin]
+
+permissions:
+  marp.use:
+    description: Parent permission for all player-facing commands
+    default: true
+  marp.home:
+    description: Use /home and teleport to your own homes
+    default: true
+  marp.sethome:
+    description: Use /sethome
+    default: true
+  marp.delhome:
+    description: Use /delhome and delete your own homes in the GUI
+    default: true
+  marp.homes:
+    description: Use /homes and edit your own home display name, lore, and icon
+    default: true
+  marp.warp:
+    description: Use /warp and teleport to permitted warps
+    default: true
+  marp.warps:
+    description: Use /warps
+    default: true
+  marp.back:
+    description: Use /back
+    default: true
+  marp.cancel:
+    description: Cancel your pending teleport
+    default: true
+  marp.homelimit.unlimited:
+    description: Removes the home count limit
+    default: op
+  marp.warp.access.*:
+    description: Access every warp when per-warp permissions are enabled
+    default: false
+  marp.admin.setwarp:
+    description: Create or move warps
+    default: op
+  marp.admin.delwarp:
+    description: Delete warps
+    default: op
+  marp.admin.editwarp:
+    description: Edit warp display name, lore, and icon without moving it
+    default: op
+  marp.admin.reload:
+    description: Reload configuration and messages
+    default: op
+  marp.admin.info:
+    description: Inspect plugin status
+    default: op
+  marp.admin.purge:
+    description: Remove records for worlds that no longer exist
+    default: op
+  marp.admin.homes.other:
+    description: View another player's homes
+    default: op
+  marp.bypass.cooldown:
+    description: Ignore teleport cooldowns
+    default: op
+  marp.bypass.warmup:
+    description: Skip the teleport warmup
+    default: op
+  marp.bypass.safety:
+    description: Skip safe-location checks
+    default: op
+  marp.admin.*:
+    description: Parent for all administrative permissions
+    default: op
+    children:
+      marp.admin.setwarp: true
+      marp.admin.delwarp: true
+      marp.admin.editwarp: true
+      marp.admin.reload: true
+      marp.admin.info: true
+      marp.admin.purge: true
+      marp.admin.homes.other: true
+  marp.bypass.*:
+    description: Parent for all bypass permissions
+    default: op
+    children:
+      marp.bypass.cooldown: true
+      marp.bypass.warmup: true
+      marp.bypass.safety: true
+  marp.*:
+    description: Parent for every Marp permission
+    default: op
+    children:
+      marp.use: true
+      marp.admin.*: true
+      marp.bypass.*: true
+      marp.homelimit.unlimited: true

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="me.roviczzz.marp.storage.SqlStorageTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.377Z" hostname="ROVIC" time="0.2">
+  <properties/>
+  <testcase name="migrationRunnerUpgradesV0AndRefusesNewerSchema()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.029"/>
+  <testcase name="homeRepositoryUpsertOptimisticLockAndOwnershipDelete()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.028"/>
+  <testcase name="unwritablePathFailsCleanlyWithoutLocking()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.002"/>
+  <testcase name="warpRepositoryGlobalUniquenessUpsertAndPaging()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.017"/>
+  <testcase name="v1SchemaAppliesPragmasTablesAndUniqueConstraint()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.015"/>
+  <testcase name="dbExecutorRunsOnNamedThreadAndHonoursShutdownBound()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.09"/>
+  <testcase name="backRepositoryKeepsDeathAndTeleportIndependently()" classname="me.roviczzz.marp.storage.SqlStorageTest" time="0.016"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

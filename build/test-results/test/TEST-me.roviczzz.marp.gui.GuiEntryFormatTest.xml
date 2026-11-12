@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="me.roviczzz.marp.gui.GuiEntryFormatTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.278Z" hostname="ROVIC" time="0.012">
+  <properties/>
+  <testcase name="normalizeMaterialNameFallsBackForBlankOrAir()" classname="me.roviczzz.marp.gui.GuiEntryFormatTest" time="0.0"/>
+  <testcase name="holderPreservesIdentityFieldsAndClampsPage()" classname="me.roviczzz.marp.gui.GuiEntryFormatTest" time="0.002"/>
+  <testcase name="entryLoreRendersCoordsLockedMarkerAndMissingWorldFallback()" classname="me.roviczzz.marp.gui.GuiEntryFormatTest" time="0.01"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

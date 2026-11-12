@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="me.roviczzz.marp.config.MessageServiceTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-12T06:36:23.270Z" hostname="ROVIC" time="0.007">
+  <properties/>
+  <testcase name="userValuesCannotInjectTags()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.002"/>
+  <testcase name="displayNameRenderingFallsBackWhenMalformed()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.001"/>
+  <testcase name="formattingIsApplied()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.0"/>
+  <testcase name="unknownKeyReturnsAVisibleFallback()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.001"/>
+  <testcase name="placeholdersAreSubstituted()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.001"/>
+  <testcase name="brokenTemplateFallsBackToPlainText()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.001"/>
+  <testcase name="oversizedTemplateIsBounded()" classname="me.roviczzz.marp.config.MessageServiceTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
