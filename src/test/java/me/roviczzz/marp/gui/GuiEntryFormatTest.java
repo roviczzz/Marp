@@ -62,6 +62,11 @@ class GuiEntryFormatTest {
                 List.of(), loc, 1_700_000_000_000L, false, false);
         List<String> plainMissing = missingWorldLore.stream().map(msg::plain).toList();
         assertTrue(plainMissing.stream().anyMatch(s -> s.contains("not loaded")));
+
+        List<Component> bedLore = factory.buildEntryLore(
+                List.of(), loc, 1_700_000_000_000L, true, false, true);
+        List<String> plainBed = bedLore.stream().map(msg::plain).toList();
+        assertTrue(plainBed.stream().anyMatch(s -> s.contains("Bed Respawn Home")));
     }
 
     @Test

@@ -31,9 +31,34 @@ public final class TeleportSessionRegistry {
             LocationSnapshot target,
             BackKind backKind,
             int warmupSeconds) {
+        return start(player, reason, targetName, origin, target, backKind, warmupSeconds, null);
+    }
+
+    public TeleportSession start(
+            UUID player,
+            TeleportReason reason,
+            String targetName,
+            LocationSnapshot origin,
+            LocationSnapshot target,
+            BackKind backKind,
+            int warmupSeconds,
+            UUID anchorPlayer) {
+        return start(player, reason, targetName, origin, target, backKind, warmupSeconds, anchorPlayer, false);
+    }
+
+    public TeleportSession start(
+            UUID player,
+            TeleportReason reason,
+            String targetName,
+            LocationSnapshot origin,
+            LocationSnapshot target,
+            BackKind backKind,
+            int warmupSeconds,
+            UUID anchorPlayer,
+            boolean requireValidBed) {
         long token = nextToken.getAndIncrement();
         TeleportSession session = new TeleportSession(
-                token, player, reason, targetName, origin, target, backKind, warmupSeconds);
+                token, player, reason, targetName, origin, target, backKind, warmupSeconds, anchorPlayer, requireValidBed);
         TeleportSession previous = active.put(player, session);
         if (previous != null) {
             previous.markCancelled();
@@ -106,6 +131,27 @@ public final class TeleportSessionRegistry {
         active.computeIfPresent(
                 session.player(),
                 (ignored, current) -> current.token() == session.token() ? null : current);
+    }
+
+    public int cancelByAnchor(
+            UUID anchorUuid,
+            CancelReason reason,
+            BiConsumer<TeleportSession, CancelReason> onCancelled) {
+        if (anchorUuid == null) {
+            return 0;
+        }
+        int count = 0;
+        for (TeleportSession session : all()) {
+            if (anchorUuid.equals(session.anchorPlayer())) {
+                if (cancelToken(session.player(), session.token(), reason, null)) {
+                    count++;
+                    if (onCancelled != null) {
+                        onCancelled.accept(session, reason);
+                    }
+                }
+            }
+        }
+        return count;
     }
 
     public void cancelAllSilently() {

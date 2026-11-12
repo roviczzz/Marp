@@ -14,14 +14,18 @@ import java.util.UUID;
 import me.roviczzz.marp.back.BackService;
 import me.roviczzz.marp.command.CompletionSupport;
 import me.roviczzz.marp.config.MarpConfig;
+import me.roviczzz.marp.favorite.FavoriteService;
 import me.roviczzz.marp.gui.DeleteConfirmMenu;
 import me.roviczzz.marp.gui.EntryEditMenu;
+import me.roviczzz.marp.gui.FavoritesMenu;
 import me.roviczzz.marp.gui.GuiItemFactory;
 import me.roviczzz.marp.gui.HomeListMenu;
 import me.roviczzz.marp.gui.MarpMenuHolder;
 import me.roviczzz.marp.gui.MenuListener;
 import me.roviczzz.marp.gui.MenuManager;
 import me.roviczzz.marp.gui.WarpListMenu;
+import me.roviczzz.marp.help.HelpCatalog;
+import me.roviczzz.marp.help.HelpEntry;
 import me.roviczzz.marp.home.HomeCache;
 import me.roviczzz.marp.home.HomeService;
 import me.roviczzz.marp.home.HomeService.EditOutcome;
@@ -29,10 +33,12 @@ import me.roviczzz.marp.home.HomeService.SetOutcome;
 import me.roviczzz.marp.input.TextInputService;
 import me.roviczzz.marp.input.TextLimits;
 import me.roviczzz.marp.model.BackEntry;
+import me.roviczzz.marp.model.FavoriteKind;
 import me.roviczzz.marp.model.Home;
 import me.roviczzz.marp.model.IconSpec;
 import me.roviczzz.marp.model.LocationSnapshot;
 import me.roviczzz.marp.model.Warp;
+import me.roviczzz.marp.settings.PlayerSettingsService;
 import me.roviczzz.marp.teleport.SafetyResult;
 import me.roviczzz.marp.teleport.SafetyService;
 import me.roviczzz.marp.teleport.TeleportReason;
@@ -40,6 +46,12 @@ import me.roviczzz.marp.teleport.TeleportService;
 import me.roviczzz.marp.teleport.TeleportSession;
 import me.roviczzz.marp.teleport.TeleportSessionRegistry;
 import me.roviczzz.marp.teleport.WarmupSampler;
+import me.roviczzz.marp.tpa.TpaDirection;
+import me.roviczzz.marp.tpa.TpaRequest;
+import me.roviczzz.marp.tpa.TpaService;
+import me.roviczzz.marp.tpa.TpaService.AcceptOutcome;
+import me.roviczzz.marp.tpa.TpaService.DenyOutcome;
+import me.roviczzz.marp.tpa.TpaService.SendOutcome;
 import me.roviczzz.marp.util.Scheduler;
 import me.roviczzz.marp.warp.WarpCache;
 import me.roviczzz.marp.warp.WarpService;
@@ -85,7 +97,10 @@ final class LiveServerSelfTest {
             MenuManager menuManager,
             MenuListener menuListener,
             GuiItemFactory itemFactory,
-            TextInputService textInput) {
+            TextInputService textInput,
+            TpaService tpaService,
+            PlayerSettingsService playerSettingsService,
+            FavoriteService favoriteService) {
         Thread thread = new Thread(() -> runOffMain(
                 plugin,
                 safetyService,
@@ -100,7 +115,10 @@ final class LiveServerSelfTest {
                 menuManager,
                 menuListener,
                 itemFactory,
-                textInput), "Marp-SelfTest");
+                textInput,
+                tpaService,
+                playerSettingsService,
+                favoriteService), "Marp-SelfTest");
         thread.setDaemon(true);
         thread.start();
     }
@@ -119,7 +137,10 @@ final class LiveServerSelfTest {
             MenuManager menuManager,
             MenuListener menuListener,
             GuiItemFactory itemFactory,
-            TextInputService textInput) {
+            TextInputService textInput,
+            TpaService tpaService,
+            PlayerSettingsService playerSettingsService,
+            FavoriteService favoriteService) {
         try {
             // 1. Task 6.7: Bukkit BlockView/SafetyService adapter (slab, lava, search, unloaded world)
             String wName = onMain(plugin, () -> {
@@ -405,7 +426,94 @@ final class LiveServerSelfTest {
             });
             plugin.getLogger().info("[SelfTest 4/7] Tasks 8.1–9.4 GUI menus, text input, and reload verified.");
 
+            // 5. Tasks 2.1 & 4.1–4.2: Schema v2, PlayerSettings, and Bed-Home integration
+            UUID bedOwner = UUID.randomUUID();
+            playerSettingsService.toggleTpa(bedOwner).join();
+            check(playerSettingsService.isTpaDisabled(bedOwner), "TPA toggle persists in PlayerSettings");
+            playerSettingsService.setTpaDisabled(bedOwner, false).join();
+            check(!playerSettingsService.isTpaDisabled(bedOwner), "TPA un-toggled");
+
+            LocationSnapshot bedLoc1 = new LocationSnapshot(wName, 100.5, 100.5625, 100.5, 0, 0);
+            LocationSnapshot bedLoc2 = new LocationSnapshot(wName, 105.5, 100.5625, 105.5, 90, 0);
+            SetOutcome bedCreatedOutcome = homeService.setBedHome(bedOwner, bedLoc1, "BLUE_BED", 1).join();
+            check(bedCreatedOutcome instanceof SetOutcome.Created, "Bed home created outcome");
+            Home createdBed = ((SetOutcome.Created) bedCreatedOutcome).home();
+            check(createdBed.isBed(), "Bed home is marked isBed");
+            check(HomeService.manualCount(homeService.list(bedOwner).join(), cfg) == 0,
+                    "Bed home does not count toward manual limit");
+
+            SetOutcome bedUpdatedOutcome = homeService.setBedHome(bedOwner, bedLoc2, "WHITE_BED", 1).join();
+            check(bedUpdatedOutcome instanceof SetOutcome.Updated, "Bed home updated outcome");
+            Home updatedBed = ((SetOutcome.Updated) bedUpdatedOutcome).home();
+            check(bedLoc2.equals(updatedBed.location()), "Bed home location updated on second bed interaction");
+            check("BLUE_BED".equals(updatedBed.icon().material()), "Custom/initial icon preserved on bed overwrite");
+            plugin.getLogger().info("[SelfTest 5/7] Tasks 2.1 & 4.1–4.2 Schema v2, settings, and bed-home verified.");
+
+            // 6. Tasks 5.1–5.2: Favorites, pinned sorting, /home resolution priority, and FavoritesMenu
+            UUID favOwner = UUID.randomUUID();
+            SetOutcome f1Outcome = homeService.setHome(favOwner, "farm", homeLoc, 10).join();
+            SetOutcome f2Outcome = homeService.setHome(favOwner, "mine", homeLoc, 10).join();
+            check(f1Outcome instanceof SetOutcome.Created && f2Outcome instanceof SetOutcome.Created, "Homes created");
+            Home fHome1 = ((SetOutcome.Created) f1Outcome).home();
+            Home fHome2 = ((SetOutcome.Created) f2Outcome).home();
+            favoriteService.toggle(favOwner, FavoriteKind.HOME, fHome2.id(), 5).join();
+            check(favoriteService.isFavorite(favOwner, FavoriteKind.HOME, fHome2.id()),
+                    "Mine home is starred");
+            check(!favoriteService.isFavorite(favOwner, FavoriteKind.HOME, fHome1.id()),
+                    "Farm home is unstarred");
+
+            List<Home> sortedFavs = favoriteService.sortHomesWithFavorites(favOwner, List.of(fHome1, fHome2));
+            check(sortedFavs.get(0).id() == fHome2.id(), "Starred home is pinned first");
+
+            // /home no-arg resolution with DEFAULT_FIRST picks top favorite when no default 'home' exists
+            Home topFavResolved = ((HomeService.ResolveOutcome.Found)
+                    homeService.resolveForTeleport(favOwner, null).join()).home();
+            check("mine".equals(topFavResolved.nameKey()), "Top favorite resolved when default home is missing");
+
+            onMain(plugin, () -> {
+                MarpMenuHolder favHolder = new MarpMenuHolder(
+                        MarpMenuHolder.MenuType.FAVORITES, MarpMenuHolder.TargetKind.MIXED, favOwner, 0, 0L, 0L);
+                check(favHolder.menuType() == MarpMenuHolder.MenuType.FAVORITES, "FavoritesMenu holder valid");
+                return null;
+            });
+            favoriteService.toggle(favOwner, FavoriteKind.HOME, fHome2.id(), 5).join();
+            check(!favoriteService.isFavorite(favOwner, FavoriteKind.HOME, fHome2.id()), "Unstarred cleanly");
+            plugin.getLogger().info("[SelfTest 6/7] Tasks 5.1–5.2 Favorites, pinned sorting, and menu holder verified.");
+
+            // 7. Tasks 3.1–3.3 & 6.1–6.2: TPA requests, commands, and Help catalog directory
+            UUID tpaSender = UUID.randomUUID();
+            UUID tpaTarget = UUID.randomUUID();
+            SendOutcome tpaSent = tpaService.sendRequest(
+                    TpaDirection.TPA, tpaSender, "Sender", wName, tpaTarget, "Target", wName);
+            check(tpaSent instanceof SendOutcome.Sent, "TPA request sent successfully");
+            TpaRequest tpaReq = ((SendOutcome.Sent) tpaSent).request();
+            check(tpaService.outgoingFor(tpaSender).isPresent(), "Outgoing request active");
+            check(tpaService.sendRequest(
+                    TpaDirection.TPA, tpaSender, "Sender", wName, favOwner, "Other", wName)
+                    instanceof SendOutcome.AlreadyPending, "Duplicate outgoing rejected");
+
+            AcceptOutcome acceptReady = tpaService.prepareAccept(
+                    tpaTarget, null, wName, u -> wName);
+            check(acceptReady instanceof AcceptOutcome.Ready, "TPA accept ready");
+            check(tpaService.consumeAccepted(tpaReq.id()), "Accepted request consumed");
+
+            // /marp help dispatch and catalog checks
+            List<HelpEntry> helpEntries = HelpCatalog.visibleEntries(p -> true, cfg);
+            check(!helpEntries.isEmpty(), "Help catalog contains entries");
+            onMain(plugin, () -> {
+                CommandSender console = Bukkit.getConsoleSender();
+                Bukkit.dispatchCommand(console, "marp help 1");
+                return null;
+            });
+            plugin.getLogger().info("[SelfTest 7/7] Tasks 3.1–3.3 & 6.1–6.2 TPA requests and /marp help verified.");
+
             // Cleanup test data
+            for (Home h : homeService.list(bedOwner).join()) {
+                homeService.deleteById(h.id(), bedOwner).join();
+            }
+            for (Home h : homeService.list(favOwner).join()) {
+                homeService.deleteById(h.id(), favOwner).join();
+            }
             for (Home h : homeService.list(owner).join()) {
                 homeService.deleteById(h.id(), owner).join();
             }

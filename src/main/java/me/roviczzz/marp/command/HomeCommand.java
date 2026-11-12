@@ -80,7 +80,7 @@ public final class HomeCommand implements CommandExecutor, TabCompleter {
                     if (outcome instanceof ResolveOutcome.Found found) {
                         Home home = found.home();
                         teleportService.requestTeleport(
-                                uuid, TeleportReason.HOME, home.nameKey(), home.location(), null);
+                                uuid, TeleportReason.HOME, home.nameKey(), home.location(), null, home.isBed());
                     } else if (outcome instanceof ResolveOutcome.NotFound notFound) {
                         support.messages().send(
                                 online, Messages.HOME_NOT_FOUND, Map.of("name", notFound.nameKey()));

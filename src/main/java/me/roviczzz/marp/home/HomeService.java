@@ -5,7 +5,9 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import me.roviczzz.marp.config.MarpConfig;
 import me.roviczzz.marp.model.Home;
@@ -58,6 +60,8 @@ public final class HomeService {
     private final Supplier<MarpConfig> config;
     private final Supplier<NameRules> nameRules;
     private final LongSupplier clock;
+    private final Predicate<UUID> bedOptedOut;
+    private final Function<UUID, Optional<Long>> topFavoriteHomeResolver;
 
     public HomeService(
             HomeRepository repository,
@@ -65,11 +69,34 @@ public final class HomeService {
             Supplier<MarpConfig> config,
             Supplier<NameRules> nameRules,
             LongSupplier clock) {
+        this(repository, cache, config, nameRules, clock, uuid -> false, uuid -> Optional.empty());
+    }
+
+    public HomeService(
+            HomeRepository repository,
+            HomeCache cache,
+            Supplier<MarpConfig> config,
+            Supplier<NameRules> nameRules,
+            LongSupplier clock,
+            Predicate<UUID> bedOptedOut) {
+        this(repository, cache, config, nameRules, clock, bedOptedOut, uuid -> Optional.empty());
+    }
+
+    public HomeService(
+            HomeRepository repository,
+            HomeCache cache,
+            Supplier<MarpConfig> config,
+            Supplier<NameRules> nameRules,
+            LongSupplier clock,
+            Predicate<UUID> bedOptedOut,
+            Function<UUID, Optional<Long>> topFavoriteHomeResolver) {
         this.repository = repository;
         this.cache = cache;
         this.config = config;
         this.nameRules = nameRules;
         this.clock = clock;
+        this.bedOptedOut = bedOptedOut;
+        this.topFavoriteHomeResolver = topFavoriteHomeResolver;
     }
 
     public CompletableFuture<List<Home>> loadCache(UUID player) {
@@ -97,12 +124,44 @@ public final class HomeService {
         }
 
         String defaultKey = config.get().defaultHomeName();
+        MarpConfig cfg = config.get();
         return loadCache(player).thenApply(homes -> {
+            Home defaultHome = null;
             for (Home home : homes) {
                 if (home.nameKey().equalsIgnoreCase(defaultKey)) {
-                    return new ResolveOutcome.Found(home);
+                    defaultHome = home;
+                    break;
                 }
             }
+
+            Home topFavHome = null;
+            Optional<Long> topFavId = topFavoriteHomeResolver.apply(player);
+            if (topFavId.isPresent()) {
+                long favId = topFavId.get();
+                for (Home home : homes) {
+                    if (home.id() == favId) {
+                        topFavHome = home;
+                        break;
+                    }
+                }
+            }
+
+            if (cfg.homeNoArgPriority() == MarpConfig.HomeNoArgPriority.FAVORITE_FIRST) {
+                if (topFavHome != null) {
+                    return new ResolveOutcome.Found(topFavHome);
+                }
+                if (defaultHome != null) {
+                    return new ResolveOutcome.Found(defaultHome);
+                }
+            } else {
+                if (defaultHome != null) {
+                    return new ResolveOutcome.Found(defaultHome);
+                }
+                if (topFavHome != null) {
+                    return new ResolveOutcome.Found(topFavHome);
+                }
+            }
+
             if (homes.size() == 1) {
                 return new ResolveOutcome.Found(homes.get(0));
             }
@@ -123,6 +182,14 @@ public final class HomeService {
         }
 
         String key = validated.key();
+        MarpConfig cfg = config.get();
+        if (cfg.bedHomeEnabled()
+                && cfg.bedHomeReserveName()
+                && !bedOptedOut.test(owner)
+                && key.equals(resolvedBedKey(cfg, rules))) {
+            return CompletableFuture.completedFuture(new SetOutcome.InvalidName(
+                    NameRules.Reason.RESERVED, candidate, rules.patternText(), rules.maxLength()));
+        }
         long now = clock.getAsLong();
 
         return repository.findByPlayerAndName(owner, key).thenCompose(existingOpt -> {
@@ -139,7 +206,10 @@ public final class HomeService {
                 return CompletableFuture.completedFuture(new SetOutcome.LimitZero());
             }
 
-            return repository.countByPlayer(owner).thenCompose(count -> {
+            CompletableFuture<Integer> countFuture = cfg.bedHomeCountsTowardLimit()
+                    ? repository.countByPlayer(owner)
+                    : repository.countManualByPlayer(owner);
+            return countFuture.thenCompose(count -> {
                 if (count >= limit) {
                     return CompletableFuture.completedFuture(new SetOutcome.LimitReached(limit));
                 }
@@ -152,6 +222,7 @@ public final class HomeService {
                         IconSpec.material(DEFAULT_ICON_MATERIAL),
                         null,
                         List.of(),
+                        false,
                         0L,
                         now,
                         now);
@@ -163,6 +234,82 @@ public final class HomeService {
                 });
             });
         });
+    }
+
+    public CompletableFuture<SetOutcome> setBedHome(
+            UUID owner, LocationSnapshot location, String iconMaterial, int limit) {
+        MarpConfig cfg = config.get();
+        NameRules rules = nameRules.get();
+        String key = resolvedBedKey(cfg, rules);
+        String material = (iconMaterial == null || iconMaterial.isBlank()) ? "RED_BED" : iconMaterial;
+        long now = clock.getAsLong();
+
+        return repository.findByPlayerAndName(owner, key).thenCompose(existingOpt -> {
+            if (existingOpt.isPresent()) {
+                Home existing = existingOpt.get();
+                Home moved = existing.withLocation(location, now);
+                return repository.insert(moved).thenApply(saved -> {
+                    cache.add(owner, saved.nameKey());
+                    return new SetOutcome.Updated(saved);
+                });
+            }
+
+            CompletableFuture<Optional<SetOutcome>> limitCheck;
+            if (cfg.bedHomeCountsTowardLimit()) {
+                if (limit <= 0) {
+                    return CompletableFuture.completedFuture(new SetOutcome.LimitZero());
+                }
+                limitCheck = repository.countByPlayer(owner)
+                        .thenApply(count -> count >= limit
+                                ? Optional.of(new SetOutcome.LimitReached(limit))
+                                : Optional.empty());
+            } else {
+                limitCheck = CompletableFuture.completedFuture(Optional.empty());
+            }
+
+            return limitCheck.thenCompose(blockedOpt -> {
+                if (blockedOpt.isPresent()) {
+                    return CompletableFuture.completedFuture(blockedOpt.get());
+                }
+                Home fresh = new Home(
+                        0L,
+                        owner,
+                        key,
+                        key,
+                        location,
+                        IconSpec.material(material),
+                        null,
+                        List.of(),
+                        true,
+                        0L,
+                        now,
+                        now);
+                return repository.insert(fresh).thenApply(saved -> {
+                    cache.add(owner, saved.nameKey());
+                    return saved.rev() == 0L
+                            ? new SetOutcome.Created(saved)
+                            : new SetOutcome.Updated(saved);
+                });
+            });
+        });
+    }
+
+    public static int manualCount(List<Home> homes, MarpConfig cfg) {
+        if (cfg.bedHomeCountsTowardLimit()) {
+            return homes.size();
+        }
+        int count = 0;
+        for (Home home : homes) {
+            if (!home.isBed()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String resolvedBedKey(MarpConfig cfg, NameRules rules) {
+        NameRules.Result validated = rules.validate(cfg.bedHomeName());
+        return validated.valid() ? validated.key() : "bed";
     }
 
     public CompletableFuture<Optional<Home>> deleteByName(UUID owner, String rawNameOrNull) {

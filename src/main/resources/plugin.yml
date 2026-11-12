@@ -35,15 +35,59 @@ commands:
   back:
     description: Return to your last death or teleport point
     usage: /back
+  tpa:
+    description: Request to teleport to another player
+    usage: /tpa <player>
+  tpahere:
+    description: Request another player to teleport to you
+    usage: /tpahere <player>
+  tpaccept:
+    description: Accept a pending teleport request
+    usage: /tpaccept [player]
+  tpdeny:
+    description: Decline a pending teleport request
+    usage: /tpdeny [player]
+  tpcancel:
+    description: Cancel your pending teleport request
+    usage: /tpcancel
+  tptoggle:
+    description: Toggle receiving teleport requests
+    usage: /tptoggle [on|off]
+  bedtoggle:
+    description: Toggle automatic bed home creation
+    usage: /bedtoggle [on|off]
+  favorites:
+    description: Open your favorites menu or manage favorites
+    usage: /favorites
+    aliases: [fav, favs]
   marp:
-    description: Marp administration
-    usage: /marp <reload|cancel|info>
+    description: Marp help and administration
+    usage: /marp [help|cancel|bed|reload|info]
     aliases: [marpadmin]
 
 permissions:
   marp.use:
     description: Parent permission for all player-facing commands
     default: true
+    children:
+      marp.home: true
+      marp.sethome: true
+      marp.delhome: true
+      marp.homes: true
+      marp.warp: true
+      marp.warps: true
+      marp.back: true
+      marp.cancel: true
+      marp.tpa: true
+      marp.tpahere: true
+      marp.tpaccept: true
+      marp.tpdeny: true
+      marp.tpcancel: true
+      marp.tptoggle: true
+      marp.bedhome: true
+      marp.bedhome.toggle: true
+      marp.favorites: true
+      marp.help: true
   marp.home:
     description: Use /home and teleport to your own homes
     default: true
@@ -68,8 +112,41 @@ permissions:
   marp.cancel:
     description: Cancel your pending teleport
     default: true
+  marp.tpa:
+    description: Send /tpa teleport requests
+    default: true
+  marp.tpahere:
+    description: Send /tpahere teleport requests
+    default: true
+  marp.tpaccept:
+    description: Accept incoming teleport requests
+    default: true
+  marp.tpdeny:
+    description: Decline incoming teleport requests
+    default: true
+  marp.tpcancel:
+    description: Cancel your outgoing teleport request
+    default: true
+  marp.tptoggle:
+    description: Toggle receiving teleport requests
+    default: true
+  marp.bedhome:
+    description: Automatically set a home from your bed or respawn point
+    default: true
+  marp.bedhome.toggle:
+    description: Toggle automatic bed home creation
+    default: true
+  marp.favorites:
+    description: Use /favorites and star homes and warps
+    default: true
+  marp.help:
+    description: View the /marp help command list
+    default: true
   marp.homelimit.unlimited:
     description: Removes the home count limit
+    default: op
+  marp.favoritelimit.unlimited:
+    description: Removes the favorite count limit
     default: op
   marp.warp.access.*:
     description: Access every warp when per-warp permissions are enabled
@@ -130,3 +207,4 @@ permissions:
       marp.admin.*: true
       marp.bypass.*: true
       marp.homelimit.unlimited: true
+      marp.favoritelimit.unlimited: true

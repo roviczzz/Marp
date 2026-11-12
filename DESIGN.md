@@ -218,7 +218,15 @@ me.roviczzz.marp
 | `/delwarp` | `/delwarp <name>` | required identifier | `marp.admin.delwarp` | op | — | all warp names | `/delwarp spawn` |
 | `/warps` | `/warps` | none | `marp.warps` | true | — | none | `/warps` |
 | `/back` | `/back` | none | `marp.back` | true | — | none | `/back` |
-| `/marp` | `/marp <reload\|cancel\|info\|purge>` | subcommand | varies | op | `/marpadmin` | subcommands | `/marp reload` |
+| `/tpa` | `/tpa <player>` | target player | `marp.tpa` | true | — | visible players | `/tpa Steve` |
+| `/tpahere` | `/tpahere <player>` | target player | `marp.tpahere` | true | — | visible players | `/tpahere Steve` |
+| `/tpaccept` | `/tpaccept [player]` | optional requester | `marp.tpaccept` | true | — | pending requesters | `/tpaccept Steve` |
+| `/tpdeny` | `/tpdeny [player]` | optional requester | `marp.tpdeny` | true | — | pending requesters | `/tpdeny Steve` |
+| `/tpcancel` | `/tpcancel` | none | `marp.tpcancel` | true | — | none | `/tpcancel` |
+| `/tptoggle` | `/tptoggle [on\|off]` | optional toggle state | `marp.tptoggle` | true | — | `on`, `off` | `/tptoggle on` |
+| `/bedtoggle` | `/bedtoggle [on\|off]` | optional toggle state | `marp.bedhome.toggle` | true | — | `on`, `off` | `/bedtoggle on` |
+| `/favorites` | `/favorites` | none | `marp.favorites` | true | `/fav`, `/favs` | none | `/favorites` |
+| `/marp` | `/marp [help\|cancel\|bed\|reload\|info] [page]` | subcommand | varies | `marp.help` | `/marpadmin` | subcommands, page numbers | `/marp help 1` |
 
 ### 3.3 Command behavior details
 
@@ -362,6 +370,18 @@ commands:
 | `marp.warps` | true | `/warps` GUI |
 | `marp.back` | true | `/back` |
 | `marp.cancel` | true | `/marp cancel` |
+| `marp.tpa` | true | `/tpa <player>` |
+| `marp.tpahere` | true | `/tpahere <player>` |
+| `marp.tpaccept` | true | `/tpaccept` |
+| `marp.tpdeny` | true | `/tpdeny` |
+| `marp.tpcancel` | true | `/tpcancel` |
+| `marp.tptoggle` | true | `/tptoggle` |
+| `marp.bedhome` | true | Auto-bed home capture |
+| `marp.bedhome.toggle` | true | `/bedtoggle` and `/marp bed` |
+| `marp.favorites` | true | `/favorites` and starring |
+| `marp.help` | true | `/marp` and `/marp help` |
+| `marp.favoritelimit.<n>` | false | Favorite limit = highest matching `n` |
+| `marp.favoritelimit.unlimited` | op | No favorite limit (capped by absolute-max) |
 | `marp.homelimit.<n>` | false | Home limit = highest matching `n` (e.g. `marp.homelimit.5`) |
 | `marp.homelimit.unlimited` | op | No home limit |
 | `marp.warp.access.<name>` | false | Dynamic per-warp access when `warps.per-warp-permissions: true`; not listed in `plugin.yml` |
@@ -1652,4 +1672,35 @@ Only #1, #2, #5, #6, #10, #21, and #22 affect core control flow or the data mode
 - [x] Restart preserves homes/warps/back; SQLite has no lock errors under two concurrent players.
 - [x] No JDBC call on the main thread; plugin disables cleanly with a bounded DB shutdown.
 - [x] `runServer` smoke test passes with the shaded jar (or Paper `libraries`).
+
+---
+
+## 15. v0.2 Feature Addendum (Extensions)
+
+### 15.1 Teleport Requests (/tpa)
+- Commands: `/tpa <player>`, `/tpahere <player>`, `/tpaccept [player]`, `/tpdeny [player]`, `/tpcancel`, `/tptoggle [on|off]`.
+- Clickable Adventure `[Accept]`, `[Deny]`, and `[Cancel]` buttons in chat with detailed hover tooltips (direction, target world, remaining expiry time), built around `MessageService` templates while keeping its MiniMessage tag whitelist strict.
+- 1 active outgoing request per requester; 60s timeout expiry; explicit disambiguation listing on bare `/tpaccept` when multiple requests are pending; 30s per-pair deny cooldown.
+- Teleport pipeline rules (warmup, movement/damage/command cancellation, cooldown, safety, `/back` origin) bind strictly to the mover, while anchor is re-resolved to their live location on arrival.
+- Incoming request blocking via `/tptoggle`, persisted in `player_settings.tpa_disabled`.
+
+### 15.2 Bed / Respawn Integration
+- Listens to Paper's `PlayerSetSpawnEvent` (`Cause.BED`, and opt-in `Cause.RESPAWN_ANCHOR`) to automatically create or update the player's `bed` home.
+- Preserves custom display metadata on overwrite; exempt from manual home limits by default (`homes.is_bed = 1`); supports disabled worlds and `/bedtoggle` (`/marp bed [on|off]`).
+- Default snapshot-home mode allows returning even if the bed is later broken; optional `require-valid-bed: true` validates bed existence after async chunk loading.
+- Marked in `/homes` GUI with `RED_BED` default material, `gui.home-lore-bed` badge, and row-5 Auto-Bed toggle button.
+
+### 15.3 Favorites
+- Starring homes and warps persisted in SQLite `favorites` table keyed by `(player_uuid, target_kind, target_id)`.
+- Bounded by `marp.favoritelimit.<n>` and `marp.favoritelimit.unlimited` (fallback default 9).
+- Pinned to the top of `/homes` and `/warps` in insertion order (`sort_order ASC`).
+- Dedicated `/favorites` (`/fav`) 54-slot chest menu with `All | Homes | Warps` filter cycling.
+- Non-conflicting row-5 Star Mode toggle in lists and slot 4 favorite button in `EntryEditMenu`.
+- `/home` with no arguments resolves default home, then top favorite home, then single home, else opens `/homes` (`DEFAULT_FIRST` vs `FAVORITE_FIRST`).
+- Deleting a home or warp cleans up favorite rows transactionally.
+
+### 15.4 Help Command (/marp)
+- `/marp` (0 args) and `/marp help [page]` render a permission-aware, feature-flag-aware command directory grouped into `Homes`, `Warps`, `Teleporting`, `General & Admin`.
+- Paginated at 7 entries per page with clickable `[<< Previous]` and `[Next >>]` footer buttons.
+- Clickable rows (run command for safe/GUI actions; suggest command in chat for argument-taking actions) with rich hover details (syntax, description, example, click hint, and admin permission node).
 

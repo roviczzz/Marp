@@ -13,6 +13,7 @@ public record Home(
         IconSpec icon,
         String displayName,
         List<String> lore,
+        boolean isBed,
         long rev,
         long createdAt,
         long updatedAt) {
@@ -21,11 +22,28 @@ public record Home(
         lore = lore == null ? List.of() : List.copyOf(lore);
     }
 
+    public Home(
+            long id,
+            UUID owner,
+            String name,
+            String nameKey,
+            LocationSnapshot location,
+            IconSpec icon,
+            String displayName,
+            List<String> lore,
+            long rev,
+            long createdAt,
+            long updatedAt) {
+        this(id, owner, name, nameKey, location, icon, displayName, lore, false, rev, createdAt, updatedAt);
+    }
+
     public Home withLocation(LocationSnapshot location, long updatedAt) {
-        return new Home(id, owner, name, nameKey, location, icon, displayName, lore, rev, createdAt, updatedAt);
+        return new Home(
+                id, owner, name, nameKey, location, icon, displayName, lore, isBed, rev, createdAt, updatedAt);
     }
 
     public Home withMetadata(IconSpec icon, String displayName, List<String> lore, long rev, long updatedAt) {
-        return new Home(id, owner, name, nameKey, location, icon, displayName, lore, rev, createdAt, updatedAt);
+        return new Home(
+                id, owner, name, nameKey, location, icon, displayName, lore, isBed, rev, createdAt, updatedAt);
     }
 }

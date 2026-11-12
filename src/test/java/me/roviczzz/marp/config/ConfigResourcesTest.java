@@ -37,9 +37,16 @@ class ConfigResourcesTest {
         assertNotNull(config.getConfigurationSection("back"));
         assertNotNull(config.getConfigurationSection("teleport"));
         assertNotNull(config.getConfigurationSection("gui"));
+        assertNotNull(config.getConfigurationSection("tpa"));
+        assertNotNull(config.getConfigurationSection("bed-home"));
+        assertNotNull(config.getConfigurationSection("favorites"));
+        assertNotNull(config.getConfigurationSection("help"));
         assertTrue(config.getBoolean("homes.enabled"));
         assertTrue(config.getBoolean("warps.enabled"));
         assertTrue(config.getBoolean("back.enabled"));
+        assertTrue(config.getBoolean("tpa.enabled"));
+        assertTrue(config.getBoolean("bed-home.enabled"));
+        assertTrue(config.getBoolean("favorites.enabled"));
         assertEquals("marp.db", config.getString("storage.sqlite.file"));
         assertEquals("SEARCH", config.getString("teleport.safety.mode"));
     }

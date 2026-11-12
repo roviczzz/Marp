@@ -1,6 +1,7 @@
 package me.roviczzz.marp.listener;
 
 import me.roviczzz.marp.back.BackService;
+import me.roviczzz.marp.teleport.CombatTracker;
 import me.roviczzz.marp.teleport.WarmupSampler;
 import me.roviczzz.marp.util.LocationCodec;
 import org.bukkit.entity.Player;
@@ -18,16 +19,25 @@ public final class DeathListener implements Listener {
 
     private final WarmupSampler sampler;
     private final BackService backService;
+    private final CombatTracker combatTracker;
 
     public DeathListener(WarmupSampler sampler, BackService backService) {
+        this(sampler, backService, null);
+    }
+
+    public DeathListener(WarmupSampler sampler, BackService backService, CombatTracker combatTracker) {
         this.sampler = sampler;
         this.backService = backService;
+        this.combatTracker = combatTracker;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         sampler.onDeath(player.getUniqueId());
+        if (combatTracker != null) {
+            combatTracker.clear(player.getUniqueId());
+        }
         if (player.getWorld() == null) {
             return;
         }

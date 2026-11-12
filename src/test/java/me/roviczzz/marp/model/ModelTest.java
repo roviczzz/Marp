@@ -42,7 +42,13 @@ class ModelTest {
                 1L, owner, "base", "base", location, IconSpec.material("GRASS_BLOCK"), "Base", List.of("line"), 0, 10, 20);
 
         assertEquals(home, same);
+        assertFalse(home.isBed());
         assertEquals(List.of("line"), home.lore());
         assertNotEquals(home, home.withMetadata(IconSpec.material("STONE"), "Base", List.of(), 1, 30));
+
+        Home bedHome = new Home(
+                2L, owner, "bed", "bed", location, IconSpec.material("RED_BED"), null, List.of(), true, 0, 10, 20);
+        assertTrue(bedHome.isBed());
+        assertTrue(bedHome.withLocation(location, 30L).isBed());
     }
 }

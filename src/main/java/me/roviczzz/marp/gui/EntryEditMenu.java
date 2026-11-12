@@ -32,6 +32,7 @@ import org.bukkit.inventory.ItemStack;
  */
 public final class EntryEditMenu implements Menu {
 
+    public static final int SLOT_FAVORITE = 4;
     public static final int SLOT_NAME = 10;
     public static final int SLOT_LORE = 12;
     public static final int SLOT_ICON = 14;
@@ -89,6 +90,14 @@ public final class EntryEditMenu implements Menu {
         ItemStack filler = factory.filler();
         for (int i = 0; i < 27; i++) {
             inventory.setItem(i, filler);
+        }
+
+        if (manager.config().favoritesEnabled() && manager.favoriteService() != null) {
+            me.roviczzz.marp.model.FavoriteKind kind = targetKind == TargetKind.HOME
+                    ? me.roviczzz.marp.model.FavoriteKind.HOME
+                    : me.roviczzz.marp.model.FavoriteKind.WARP;
+            boolean isFav = manager.favoriteService().isFavorite(holder.owner(), kind, entryId());
+            inventory.setItem(SLOT_FAVORITE, factory.favoriteSlotButton(isFav));
         }
 
         String currentName = currentDisplayName() != null ? currentDisplayName() : identifier();
@@ -160,6 +169,7 @@ public final class EntryEditMenu implements Menu {
             return;
         }
         switch (slot) {
+            case SLOT_FAVORITE -> toggleFavorite(player);
             case SLOT_NAME -> beginNameInput(player);
             case SLOT_LORE -> beginLoreInput(player);
             case SLOT_ICON -> updateIconFromHand(player);
@@ -180,6 +190,48 @@ public final class EntryEditMenu implements Menu {
         }
         return player.hasPermission("marp.admin.setwarp")
                 || player.hasPermission("marp.admin.editwarp");
+    }
+
+    private void toggleFavorite(Player player) {
+        if (manager.favoriteService() == null || !manager.config().favoritesEnabled()) {
+            return;
+        }
+        if (!player.hasPermission("marp.favorites")) {
+            manager.messages().send(player, Messages.NO_PERMISSION);
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        me.roviczzz.marp.model.FavoriteKind kind = targetKind == TargetKind.HOME
+                ? me.roviczzz.marp.model.FavoriteKind.HOME
+                : me.roviczzz.marp.model.FavoriteKind.WARP;
+        int favLimit = manager.resolveFavoriteLimit(player);
+        manager.playClickSound(player);
+        manager.favoriteService().toggle(uuid, kind, entryId(), favLimit)
+                .whenComplete((outcome, error) -> manager.scheduler().runOnMain(() -> {
+                    Player online = Bukkit.getPlayer(uuid);
+                    if (online == null || !online.isOnline()) {
+                        return;
+                    }
+                    if (error != null || outcome == null) {
+                        manager.messages().send(online, Messages.STORAGE_ERROR);
+                        return;
+                    }
+                    if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.Added) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_ADDED, Map.of("name", identifier()));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.Removed) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_REMOVED, Map.of("name", identifier()));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.LimitReached reached) {
+                        manager.messages().send(
+                                online,
+                                Messages.FAVORITES_LIMIT_REACHED,
+                                Map.of("limit", Integer.toString(reached.limit())));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.LimitZero) {
+                        manager.messages().send(online, Messages.FAVORITES_LIMIT_ZERO);
+                    }
+                    reopenSelf(online);
+                }));
     }
 
     private void beginNameInput(Player player) {
@@ -344,6 +396,7 @@ public final class EntryEditMenu implements Menu {
     private void teleportToEntry(Player player) {
         LocationSnapshot target = targetKind == TargetKind.HOME ? home.location() : warp.location();
         TeleportReason reason = targetKind == TargetKind.HOME ? TeleportReason.HOME : TeleportReason.WARP;
+        boolean requireValidBed = targetKind == TargetKind.HOME && home.isBed();
         if (Bukkit.getWorld(target.world()) == null) {
             manager.messages().send(player, Messages.TELEPORT_FAILED);
             return;
@@ -351,7 +404,7 @@ public final class EntryEditMenu implements Menu {
         manager.playClickSound(player);
         player.closeInventory();
         manager.teleportService().requestTeleport(
-                player.getUniqueId(), reason, identifier(), target, null);
+                player.getUniqueId(), reason, identifier(), target, null, requireValidBed);
     }
 
     private void openDeleteConfirmation(Player player) {
@@ -386,6 +439,10 @@ public final class EntryEditMenu implements Menu {
         } else {
             manager.openWarpList(player, returnPage);
         }
+    }
+
+    private long entryId() {
+        return targetKind == TargetKind.HOME ? home.id() : warp.id();
     }
 
     private String identifier() {

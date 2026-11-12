@@ -51,6 +51,7 @@ teleport:
     home: 3
     warp: 3
     back: 3
+    tpa: 3
     cancel-on-move: true
     # 3D distance in blocks; yaw/pitch changes are ignored.
     movement-tolerance: 0.5
@@ -80,6 +81,7 @@ teleport:
     home: 5
     warp: 10
     back: 30
+    tpa: 15
     # v0.1 keeps cooldowns in memory; they reset on restart.
     persist: false
   safety:
@@ -146,3 +148,32 @@ gui:
   max-icon-bytes: 16384
   confirmation-seconds: 10
   input-timeout-seconds: 60
+
+tpa:
+  enabled: true
+  request-timeout-seconds: 60
+  deny-cooldown-seconds: 30
+  max-pending-incoming: 10
+  cross-world: true
+  combat-tag-seconds: 0
+  block-if-target-in-combat: true
+
+bed-home:
+  enabled: true
+  name: bed
+  counts-toward-limit: false
+  reserve-name: true
+  require-valid-bed: false
+  include-respawn-anchors: false
+  disabled-worlds: []
+
+favorites:
+  enabled: true
+  default-limit: 9
+  max-limit-node-scan: 50
+  absolute-max: 45
+  # DEFAULT_FIRST | FAVORITE_FIRST
+  home-no-arg-priority: DEFAULT_FIRST
+
+help:
+  entries-per-page: 7

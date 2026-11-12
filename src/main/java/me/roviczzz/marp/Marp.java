@@ -4,14 +4,17 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import me.roviczzz.marp.back.BackService;
 import me.roviczzz.marp.command.BackCommand;
+import me.roviczzz.marp.command.BedToggleCommand;
 import me.roviczzz.marp.command.CommandSupport;
 import me.roviczzz.marp.command.DelHomeCommand;
 import me.roviczzz.marp.command.DelWarpCommand;
+import me.roviczzz.marp.command.FavoritesCommand;
 import me.roviczzz.marp.command.HomeCommand;
 import me.roviczzz.marp.command.HomesCommand;
 import me.roviczzz.marp.command.MarpCommand;
@@ -22,26 +25,39 @@ import me.roviczzz.marp.command.WarpsCommand;
 import me.roviczzz.marp.config.ConfigLoader;
 import me.roviczzz.marp.config.MarpConfig;
 import me.roviczzz.marp.config.MessageService;
+import me.roviczzz.marp.config.Messages;
+import me.roviczzz.marp.favorite.FavoriteCache;
+import me.roviczzz.marp.favorite.FavoriteService;
 import me.roviczzz.marp.gui.GuiItemFactory;
 import me.roviczzz.marp.gui.MenuListener;
 import me.roviczzz.marp.gui.MenuManager;
+import me.roviczzz.marp.help.HelpPresenter;
 import me.roviczzz.marp.home.HomeCache;
 import me.roviczzz.marp.home.HomeService;
 import me.roviczzz.marp.input.ChatTextInput;
 import me.roviczzz.marp.input.TextInputService;
+import me.roviczzz.marp.listener.BedHomeListener;
+import me.roviczzz.marp.listener.CombatListener;
 import me.roviczzz.marp.listener.DeathListener;
 import me.roviczzz.marp.listener.ExternalTeleportListener;
 import me.roviczzz.marp.listener.InputListener;
 import me.roviczzz.marp.listener.PlayerConnectionListener;
 import me.roviczzz.marp.listener.WarmupListener;
 import me.roviczzz.marp.model.NameRules;
+import me.roviczzz.marp.settings.PlayerSettingsService;
 import me.roviczzz.marp.storage.SqlStorage;
 import me.roviczzz.marp.teleport.BukkitTeleportPlatform;
+import me.roviczzz.marp.teleport.CombatTracker;
 import me.roviczzz.marp.teleport.CooldownService;
 import me.roviczzz.marp.teleport.SafetyService;
 import me.roviczzz.marp.teleport.TeleportService;
+import me.roviczzz.marp.teleport.TeleportSession.CancelReason;
 import me.roviczzz.marp.teleport.TeleportSessionRegistry;
 import me.roviczzz.marp.teleport.WarmupSampler;
+import me.roviczzz.marp.tpa.TpaCommand;
+import me.roviczzz.marp.tpa.TpaPresenter;
+import me.roviczzz.marp.tpa.TpaRequest;
+import me.roviczzz.marp.tpa.TpaService;
 import me.roviczzz.marp.util.Scheduler;
 import me.roviczzz.marp.warp.WarpCache;
 import me.roviczzz.marp.warp.WarpService;
@@ -76,9 +92,15 @@ public final class Marp extends JavaPlugin {
     private SqlStorage storage;
     private HomeCache homeCache;
     private WarpCache warpCache;
+    private FavoriteCache favoriteCache;
+    private FavoriteService favoriteService;
     private HomeService homeService;
     private WarpService warpService;
     private BackService backService;
+    private PlayerSettingsService playerSettingsService;
+    private CombatTracker combatTracker;
+    private TpaService tpaService;
+    private TpaPresenter tpaPresenter;
     private TeleportSessionRegistry sessionRegistry;
     private CooldownService cooldownService;
     private TeleportService teleportService;
@@ -101,12 +123,23 @@ public final class Marp extends JavaPlugin {
 
         this.homeCache = new HomeCache();
         this.warpCache = new WarpCache();
+        this.favoriteCache = new FavoriteCache();
+        this.favoriteService = new FavoriteService(
+                storage.favorites(),
+                favoriteCache,
+                () -> config,
+                System::currentTimeMillis);
+        this.playerSettingsService = new PlayerSettingsService(
+                storage.playerSettings(),
+                System::currentTimeMillis);
         this.homeService = new HomeService(
                 storage.homes(),
                 homeCache,
                 () -> config,
                 () -> homeNameRules,
-                System::currentTimeMillis);
+                System::currentTimeMillis,
+                playerSettingsService::isBedHomeDisabled,
+                favoriteService::topFavoriteHomeId);
         this.warpService = new WarpService(
                 storage.warps(),
                 warpCache,
@@ -117,6 +150,15 @@ public final class Marp extends JavaPlugin {
                 storage.back(),
                 () -> config,
                 System::currentTimeMillis);
+        this.combatTracker = new CombatTracker(
+                () -> config,
+                System::currentTimeMillis);
+        this.tpaService = new TpaService(
+                () -> config,
+                playerSettingsService,
+                combatTracker,
+                System::currentTimeMillis);
+        this.tpaPresenter = new TpaPresenter(() -> messages);
 
         this.sessionRegistry = new TeleportSessionRegistry();
         this.cooldownService = new CooldownService(System::currentTimeMillis);
@@ -150,7 +192,18 @@ public final class Marp extends JavaPlugin {
                     }
                     platform.clearActionBar(uuid);
                 },
-                (uuid, seconds) -> platform.sendCountdown(uuid, seconds, config));
+                (uuid, seconds) -> platform.sendCountdown(uuid, seconds, config),
+                (session, reason) -> {
+                    if (reason.messageKey() != null) {
+                        Map<String, String> ph = (reason == CancelReason.TARGET_OFFLINE
+                                || reason == CancelReason.TARGET_DIED)
+                                ? Map.of("player", session.targetName())
+                                : Map.of();
+                        platform.sendMessage(session.player(), reason.messageKey(), ph);
+                    }
+                    platform.clearActionBar(session.player());
+                },
+                this::drainExpiredTpaRequests);
 
         this.textInputService = new ChatTextInput(scheduler, () -> config, () -> messages);
         GuiItemFactory itemFactory = new GuiItemFactory(
@@ -165,7 +218,9 @@ public final class Marp extends JavaPlugin {
                 itemFactory,
                 scheduler,
                 () -> config,
-                () -> messages);
+                () -> messages,
+                playerSettingsService,
+                favoriteService);
         this.menuListener = new MenuListener(System::currentTimeMillis);
 
         scheduleWarmupSampler();
@@ -194,6 +249,8 @@ public final class Marp extends JavaPlugin {
             }));
             for (Player online : Bukkit.getOnlinePlayers()) {
                 homeService.loadCache(online.getUniqueId());
+                playerSettingsService.load(online.getUniqueId());
+                favoriteService.loadCache(online.getUniqueId());
             }
             if (Boolean.getBoolean("marp.selftest")) {
                 LiveServerSelfTest.run(
@@ -211,7 +268,10 @@ public final class Marp extends JavaPlugin {
                         menuManager,
                         menuListener,
                         itemFactory,
-                        textInputService);
+                        textInputService,
+                        tpaService,
+                        playerSettingsService,
+                        favoriteService);
             }
         }));
     }
@@ -224,6 +284,12 @@ public final class Marp extends JavaPlugin {
         }
         if (sessionRegistry != null) {
             sessionRegistry.cancelAllSilently();
+        }
+        if (tpaService != null) {
+            tpaService.clearAll();
+        }
+        if (combatTracker != null) {
+            combatTracker.clearAll();
         }
         if (textInputService != null) {
             textInputService.cancelAllWithNotice();
@@ -303,7 +369,18 @@ public final class Marp extends JavaPlugin {
         pm.registerEvents(
                 new WarmupListener(warmupSampler, uuid -> textInputService.cancelWithNotice(uuid)),
                 this);
-        pm.registerEvents(new DeathListener(warmupSampler, backService), this);
+        pm.registerEvents(new DeathListener(warmupSampler, backService, combatTracker), this);
+        pm.registerEvents(new CombatListener(combatTracker), this);
+        pm.registerEvents(
+                new BedHomeListener(
+                        storage::isReady,
+                        homeService,
+                        playerSettingsService,
+                        menuManager::resolveHomeLimit,
+                        () -> config,
+                        () -> messages,
+                        scheduler),
+                this);
         pm.registerEvents(new ExternalTeleportListener(sessionRegistry, backService), this);
         pm.registerEvents(
                 new PlayerConnectionListener(
@@ -313,10 +390,53 @@ public final class Marp extends JavaPlugin {
                         backService,
                         warmupSampler,
                         uuid -> {
+                            playerSettingsService.load(uuid);
+                            favoriteService.loadCache(uuid);
+                        },
+                        uuid -> {
                             textInputService.clearSilent(uuid);
                             menuListener.clearPlayer(uuid);
+                            combatTracker.clear(uuid);
+                            playerSettingsService.clear(uuid);
+                            favoriteCache.clear(uuid);
+                            notifyTpaPeerQuit(uuid);
                         }),
                 this);
+    }
+
+    private void drainExpiredTpaRequests() {
+        if (tpaService == null) {
+            return;
+        }
+        for (TpaRequest expired : tpaService.drainExpired()) {
+            Player req = Bukkit.getPlayer(expired.requesterUuid());
+            if (req != null && req.isOnline()) {
+                messages.send(req, Messages.TPA_EXPIRED_SENDER, Map.of("target", expired.targetName()));
+            }
+            Player tgt = Bukkit.getPlayer(expired.targetUuid());
+            if (tgt != null && tgt.isOnline()) {
+                messages.send(tgt, Messages.TPA_EXPIRED_TARGET, Map.of("requester", expired.requesterName()));
+            }
+        }
+    }
+
+    private void notifyTpaPeerQuit(UUID quitterUuid) {
+        if (tpaService == null) {
+            return;
+        }
+        for (TpaRequest cancelled : tpaService.onQuit(quitterUuid)) {
+            if (cancelled.requesterUuid().equals(quitterUuid)) {
+                Player tgt = Bukkit.getPlayer(cancelled.targetUuid());
+                if (tgt != null && tgt.isOnline()) {
+                    messages.send(tgt, Messages.TPA_CANCELLED_OFFLINE, Map.of("player", cancelled.requesterName()));
+                }
+            } else {
+                Player req = Bukkit.getPlayer(cancelled.requesterUuid());
+                if (req != null && req.isOnline()) {
+                    messages.send(req, Messages.TPA_CANCELLED_OFFLINE, Map.of("player", cancelled.targetName()));
+                }
+            }
+        }
     }
 
     private void registerCommands() {
@@ -340,6 +460,24 @@ public final class Marp extends JavaPlugin {
 
         bindCommand("back", new BackCommand(
                 support, backService, teleportService, scheduler));
+        TpaCommand tpaCommand = new TpaCommand(
+                support,
+                tpaService,
+                tpaPresenter,
+                teleportService,
+                playerSettingsService,
+                scheduler,
+                System::currentTimeMillis);
+        bindCommand("tpa", tpaCommand);
+        bindCommand("tpahere", tpaCommand);
+        bindCommand("tpaccept", tpaCommand);
+        bindCommand("tpdeny", tpaCommand);
+        bindCommand("tpcancel", tpaCommand);
+        bindCommand("tptoggle", tpaCommand);
+        BedToggleCommand bedToggle = new BedToggleCommand(support, playerSettingsService, scheduler);
+        bindCommand("bedtoggle", bedToggle);
+        bindCommand("favorites", new FavoritesCommand(support, menuManager));
+        HelpPresenter helpPresenter = new HelpPresenter(() -> messages);
         bindCommand("marp", new MarpCommand(
                 support,
                 getPluginMeta().getVersion(),
@@ -348,7 +486,9 @@ public final class Marp extends JavaPlugin {
                 warpCache,
                 warmupSampler,
                 this::reloadMarp,
-                scheduler));
+                scheduler,
+                helpPresenter,
+                bedToggle));
     }
 
     private <T extends CommandExecutor & TabCompleter> void bindCommand(String name, T handler) {

@@ -20,6 +20,7 @@ import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 /**
@@ -60,6 +61,12 @@ public final class BukkitTeleportPlatform implements TeleportPlatform, WarmupSam
     }
 
     @Override
+    public boolean isPlayerDead(UUID uuid) {
+        Player player = Bukkit.getPlayer(uuid);
+        return player != null && player.isOnline() && player.isDead();
+    }
+
+    @Override
     public boolean isWorldLoaded(String worldName) {
         return Bukkit.getWorld(worldName) != null;
     }
@@ -67,6 +74,36 @@ public final class BukkitTeleportPlatform implements TeleportPlatform, WarmupSam
     @Override
     public CompletableFuture<SafetyResult> evaluateSafety(LocationSnapshot target, MarpConfig config) {
         return safetyService.evaluate(target, config);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> validateBedRespawn(UUID playerUuid, LocationSnapshot target) {
+        World world = Bukkit.getWorld(target.world());
+        if (world == null) {
+            return CompletableFuture.completedFuture(false);
+        }
+        int cx = (int) Math.floor(target.x()) >> 4;
+        int cz = (int) Math.floor(target.z()) >> 4;
+        return world.getChunkAtAsync(cx, cz)
+                .orTimeout(SafetyService.CHUNK_LOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .thenApply(chunk -> {
+                    Player player = Bukkit.getPlayer(playerUuid);
+                    if (player == null || !player.isOnline()) {
+                        return false;
+                    }
+                    Location respawn = player.getRespawnLocation(true);
+                    if (respawn == null || respawn.getWorld() == null) {
+                        return false;
+                    }
+                    if (!respawn.getWorld().getName().equals(target.world())) {
+                        return false;
+                    }
+                    double dx = respawn.getX() - target.x();
+                    double dy = respawn.getY() - target.y();
+                    double dz = respawn.getZ() - target.z();
+                    return (dx * dx + dy * dy + dz * dz) <= 16.0;
+                })
+                .exceptionally(err -> false);
     }
 
     @Override

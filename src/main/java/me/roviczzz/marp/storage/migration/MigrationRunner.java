@@ -24,7 +24,7 @@ public final class MigrationRunner {
     }
 
     public static MigrationRunner standard() {
-        return new MigrationRunner(List.of(new V1InitialSchema()));
+        return new MigrationRunner(List.of(new V1InitialSchema(), new V2FeaturesSchema()));
     }
 
     public int migrate(Connection connection) throws SQLException {

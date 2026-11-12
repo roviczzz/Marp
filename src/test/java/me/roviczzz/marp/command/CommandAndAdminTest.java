@@ -90,7 +90,7 @@ class CommandAndAdminTest {
             UUID playerUuid = UUID.randomUUID();
             Set<String> perms = new HashSet<>(Set.of(
                     "marp.home", "marp.sethome", "marp.delhome", "marp.homes",
-                    "marp.warp", "marp.warps", "marp.back", "marp.cancel"));
+                    "marp.warp", "marp.warps", "marp.back", "marp.cancel", "marp.help"));
 
             World fakeWorld = proxyWorld("world");
             Location[] currentLoc = {new Location(fakeWorld, 10.5, 64.0, 10.5, 90.0f, 0.0f)};
@@ -292,6 +292,15 @@ class CommandAndAdminTest {
 
             marpCmd.onCommand(player, dummy, "marp", new String[] {"cancel"});
             assertTrue(sentPlain.stream().anyMatch(s -> s.contains("Cancelled")));
+            sentPlain.clear();
+
+            // /marp with 0 args and /marp help show help directory.
+            marpCmd.onCommand(player, dummy, "marp", new String[0]);
+            assertTrue(sentPlain.stream().anyMatch(s -> s.contains("Marp Help")));
+            sentPlain.clear();
+
+            marpCmd.onCommand(player, dummy, "marp", new String[] {"help", "1"});
+            assertTrue(sentPlain.stream().anyMatch(s -> s.contains("Marp Help")));
             sentPlain.clear();
 
             // 6. Case-insensitive /home BASE, missing home not-found, and stranger /delhome isolation.

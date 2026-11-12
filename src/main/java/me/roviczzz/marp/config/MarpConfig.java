@@ -34,6 +34,11 @@ public final class MarpConfig {
         BLOCK
     }
 
+    public enum HomeNoArgPriority {
+        DEFAULT_FIRST,
+        FAVORITE_FIRST
+    }
+
     private static final List<String> DEFAULT_HAZARDS = List.of(
             "LAVA", "FIRE", "SOUL_FIRE", "MAGMA_BLOCK", "CAMPFIRE", "SOUL_CAMPFIRE",
             "POWDER_SNOW", "CACTUS", "SWEET_BERRY_BUSH", "WITHER_ROSE");
@@ -64,6 +69,7 @@ public final class MarpConfig {
         safetyMode();
         backPreference();
         unreachableFallback();
+        homeNoArgPriority();
     }
 
     public List<String> warnings() {
@@ -174,6 +180,10 @@ public final class MarpConfig {
         return Math.max(0, integer("teleport.warmup.back", 3));
     }
 
+    public int warmupTpaSeconds() {
+        return Math.max(0, integer("teleport.warmup.tpa", 3));
+    }
+
     public boolean cancelOnMove() {
         return bool("teleport.warmup.cancel-on-move", true);
     }
@@ -246,6 +256,10 @@ public final class MarpConfig {
 
     public int cooldownBackSeconds() {
         return Math.max(0, integer("teleport.cooldown.back", 30));
+    }
+
+    public int cooldownTpaSeconds() {
+        return Math.max(0, integer("teleport.cooldown.tpa", 15));
     }
 
     public boolean cooldownPersist() {
@@ -400,6 +414,102 @@ public final class MarpConfig {
 
     public int inputTimeoutSeconds() {
         return Math.max(1, integer("gui.input-timeout-seconds", 60));
+    }
+
+    // ---------------------------------------------------------------------- tpa
+
+    public boolean tpaEnabled() {
+        return bool("tpa.enabled", true);
+    }
+
+    public int tpaRequestTimeoutSeconds() {
+        return Math.max(1, integer("tpa.request-timeout-seconds", 60));
+    }
+
+    public int tpaDenyCooldownSeconds() {
+        return Math.max(0, integer("tpa.deny-cooldown-seconds", 30));
+    }
+
+    public int tpaMaxPendingIncoming() {
+        return Math.max(1, integer("tpa.max-pending-incoming", 10));
+    }
+
+    public boolean tpaCrossWorld() {
+        return bool("tpa.cross-world", true);
+    }
+
+    public int tpaCombatTagSeconds() {
+        return Math.max(0, integer("tpa.combat-tag-seconds", 0));
+    }
+
+    public boolean tpaBlockIfTargetInCombat() {
+        return bool("tpa.block-if-target-in-combat", true);
+    }
+
+    // ----------------------------------------------------------------- bed-home
+
+    public boolean bedHomeEnabled() {
+        return bool("bed-home.enabled", true);
+    }
+
+    public String bedHomeName() {
+        return string("bed-home.name", "bed").toLowerCase(Locale.ROOT);
+    }
+
+    public boolean bedHomeCountsTowardLimit() {
+        return bool("bed-home.counts-toward-limit", false);
+    }
+
+    public boolean bedHomeReserveName() {
+        return bool("bed-home.reserve-name", true);
+    }
+
+    public boolean bedHomeRequireValidBed() {
+        return bool("bed-home.require-valid-bed", false);
+    }
+
+    public boolean bedHomeIncludeRespawnAnchors() {
+        return bool("bed-home.include-respawn-anchors", false);
+    }
+
+    public Set<String> bedHomeDisabledWorlds() {
+        Set<String> worlds = new LinkedHashSet<>();
+        for (String raw : stringList("bed-home.disabled-worlds", List.of())) {
+            String trimmed = raw.trim();
+            if (!trimmed.isEmpty()) {
+                worlds.add(trimmed.toLowerCase(Locale.ROOT));
+            }
+        }
+        return worlds;
+    }
+
+    // ---------------------------------------------------------------- favorites
+
+    public boolean favoritesEnabled() {
+        return bool("favorites.enabled", true);
+    }
+
+    public int favoritesDefaultLimit() {
+        return Math.max(0, integer("favorites.default-limit", 9));
+    }
+
+    public int favoritesMaxLimitNodeScan() {
+        return Math.max(1, integer("favorites.max-limit-node-scan", 50));
+    }
+
+    public int favoritesAbsoluteMax() {
+        return Math.max(1, integer("favorites.absolute-max", 45));
+    }
+
+    public HomeNoArgPriority homeNoArgPriority() {
+        return enumValue(
+                "favorites.home-no-arg-priority", HomeNoArgPriority.class, HomeNoArgPriority.DEFAULT_FIRST);
+    }
+
+    // --------------------------------------------------------------------- help
+
+    public int helpEntriesPerPage() {
+        return Math.max(1, integer("help.entries-per-page", 7));
     }
 
     // ------------------------------------------------------------------ helpers

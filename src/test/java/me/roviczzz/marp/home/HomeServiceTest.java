@@ -132,6 +132,76 @@ class HomeServiceTest {
         assertEquals("home", def.nameKey());
     }
 
+    @Test
+    void bedHomeExemptFromLimitPreservesMetadataAndRespectsReservedName() {
+        FakeHomeRepository repo = new FakeHomeRepository();
+        HomeCache cache = new HomeCache();
+        YamlConfiguration yaml = new YamlConfiguration();
+        AtomicLong clock = new AtomicLong(1_000L);
+        boolean[] optedOut = {false};
+        HomeService service = new HomeService(
+                repo, cache, () -> new MarpConfig(yaml), NameRules::defaults, clock::get, u -> optedOut[0]);
+
+        // Fill manual limit = 1.
+        assertInstanceOf(SetOutcome.Created.class, service.setHome(PLAYER, "base", FIRST, 1).join());
+        assertInstanceOf(SetOutcome.LimitReached.class, service.setHome(PLAYER, "extra", SECOND, 1).join());
+
+        // Manual /sethome bed is rejected while bed-home.reserve-name is true and player hasn't opted out.
+        SetOutcome reserved = service.setHome(PLAYER, "bed", FIRST, 5).join();
+        SetOutcome.InvalidName invalid = assertInstanceOf(SetOutcome.InvalidName.class, reserved);
+        assertEquals(NameRules.Reason.RESERVED, invalid.reason());
+
+        // setBedHome succeeds even at manual home limit = 1.
+        Home bed = assertInstanceOf(
+                SetOutcome.Created.class, service.setBedHome(PLAYER, FIRST, "BLUE_BED", 1).join()).home();
+        assertTrue(bed.isBed());
+        assertEquals("BLUE_BED", bed.icon().material());
+        assertEquals(1, HomeService.manualCount(service.list(PLAYER).join(), new MarpConfig(yaml)));
+
+        // Custom metadata survives bed overwrite.
+        service.patchMetadata(bed.id(), PLAYER, bed.rev(), IconSpec.material("EMERALD"), Optional.of("Cozy"), null).join();
+        Home movedBed = assertInstanceOf(
+                SetOutcome.Updated.class, service.setBedHome(PLAYER, SECOND, "WHITE_BED", 1).join()).home();
+        assertEquals(SECOND, movedBed.location());
+        assertEquals("EMERALD", movedBed.icon().material());
+        assertEquals("Cozy", movedBed.displayName());
+
+        // Opting out allows manual /sethome bed if deleted first.
+        optedOut[0] = true;
+        assertTrue(service.deleteByName(PLAYER, "bed").join().isPresent());
+        assertInstanceOf(SetOutcome.Created.class, service.setHome(PLAYER, "bed", FIRST, 5).join());
+    }
+
+    @Test
+    void defaultResolutionHonorsFavoritesPriority() {
+        FakeHomeRepository repo = new FakeHomeRepository();
+        HomeCache cache = new HomeCache();
+        YamlConfiguration yaml = new YamlConfiguration();
+        Long[] topFavHolder = {null};
+        HomeService service = new HomeService(
+                repo,
+                cache,
+                () -> new MarpConfig(yaml),
+                NameRules::defaults,
+                () -> 100L,
+                u -> false,
+                u -> Optional.ofNullable(topFavHolder[0]));
+
+        Home defHome = assertInstanceOf(SetOutcome.Created.class, service.setHome(PLAYER, "home", FIRST, 5).join()).home();
+        Home starHome = assertInstanceOf(SetOutcome.Created.class, service.setHome(PLAYER, "farm", SECOND, 5).join()).home();
+        topFavHolder[0] = starHome.id();
+
+        // DEFAULT_FIRST: "home" wins even though "farm" is top favorite.
+        yaml.set("favorites.home-no-arg-priority", "DEFAULT_FIRST");
+        assertEquals(defHome.id(), assertInstanceOf(ResolveOutcome.Found.class,
+                service.resolveForTeleport(PLAYER, null).join()).home().id());
+
+        // FAVORITE_FIRST: top favorite "farm" wins over "home".
+        yaml.set("favorites.home-no-arg-priority", "FAVORITE_FIRST");
+        assertEquals(starHome.id(), assertInstanceOf(ResolveOutcome.Found.class,
+                service.resolveForTeleport(PLAYER, null).join()).home().id());
+    }
+
     private static final class FakeHomeRepository implements HomeRepository {
         private long seq = 1L;
         private final Map<Long, Home> byId = new LinkedHashMap<>();
@@ -163,6 +233,12 @@ class HomeServiceTest {
         }
 
         @Override
+        public CompletableFuture<Integer> countManualByPlayer(UUID player) {
+            return findByPlayer(player).thenApply(homes ->
+                    (int) homes.stream().filter(home -> !home.isBed()).count());
+        }
+
+        @Override
         public CompletableFuture<Integer> countAll() {
             return CompletableFuture.completedFuture(byId.size());
         }
@@ -181,6 +257,7 @@ class HomeServiceTest {
                         existing.icon(),
                         existing.displayName(),
                         existing.lore(),
+                        existing.isBed(),
                         existing.rev() + 1,
                         existing.createdAt(),
                         home.updatedAt());
@@ -197,6 +274,7 @@ class HomeServiceTest {
                     home.icon(),
                     home.displayName(),
                     home.lore(),
+                    home.isBed(),
                     0L,
                     home.createdAt(),
                     home.updatedAt());
@@ -219,6 +297,7 @@ class HomeServiceTest {
                     home.icon(),
                     home.displayName(),
                     home.lore(),
+                    current.isBed(),
                     current.rev() + 1,
                     current.createdAt(),
                     home.updatedAt());

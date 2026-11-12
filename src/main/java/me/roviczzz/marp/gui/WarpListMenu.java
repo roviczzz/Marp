@@ -22,6 +22,7 @@ public final class WarpListMenu implements Menu {
 
     private final MenuManager manager;
     private final List<Warp> visibleWarps;
+    private final boolean starMode;
     private final Page page;
     private final List<Warp> pageSlice;
     private final boolean isAdmin;
@@ -36,8 +37,19 @@ public final class WarpListMenu implements Menu {
             List<Warp> visibleWarps,
             int requestedPage,
             boolean isAdmin) {
+        this(manager, owner, visibleWarps, false, requestedPage, isAdmin);
+    }
+
+    public WarpListMenu(
+            MenuManager manager,
+            UUID owner,
+            List<Warp> visibleWarps,
+            boolean starMode,
+            int requestedPage,
+            boolean isAdmin) {
         this.manager = manager;
         this.visibleWarps = List.copyOf(visibleWarps);
+        this.starMode = starMode;
         this.rows = manager.config().guiRows();
         this.page = Pagination.page(requestedPage, this.visibleWarps.size(), rows);
         this.pageSlice = this.page.slice(this.visibleWarps);
@@ -48,7 +60,8 @@ public final class WarpListMenu implements Menu {
         this.inventory = Bukkit.createInventory(
                 holder,
                 rows * 9,
-                manager.messages().component(Messages.GUI_TITLE_WARPS));
+                manager.messages().component(
+                        starMode ? Messages.GUI_TITLE_STAR_MODE : Messages.GUI_TITLE_WARPS));
         this.holder.bind(inventory, this);
     }
 
@@ -62,7 +75,9 @@ public final class WarpListMenu implements Menu {
         for (int i = 0; i < pageSlice.size(); i++) {
             Warp warp = pageSlice.get(i);
             boolean locked = !manager.warpService().canAccess(warp, player::hasPermission);
-            inventory.setItem(i, factory.warpEntry(warp, locked));
+            boolean isFav = manager.favoriteService() != null
+                    && manager.favoriteService().isFavorite(holder.owner(), me.roviczzz.marp.model.FavoriteKind.WARP, warp.id());
+            inventory.setItem(i, factory.warpEntry(warp, locked, isFav));
         }
         if (visibleWarps.isEmpty()) {
             int emptySlot = Math.min(navBase - 5, 22);
@@ -70,8 +85,16 @@ public final class WarpListMenu implements Menu {
         }
 
         inventory.setItem(navBase, factory.previousButton(page));
-        inventory.setItem(navBase + 1, factory.filler());
-        inventory.setItem(navBase + 2, factory.filler());
+        inventory.setItem(
+                navBase + 1,
+                manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")
+                        ? factory.favoritesNavButton()
+                        : factory.filler());
+        inventory.setItem(
+                navBase + 2,
+                manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")
+                        ? factory.starModeButton(starMode)
+                        : factory.filler());
         inventory.setItem(navBase + 3, factory.warpHelpButton());
         inventory.setItem(navBase + 4, factory.warpPageInfo(page));
         inventory.setItem(navBase + 5, factory.closeButton());
@@ -103,6 +126,10 @@ public final class WarpListMenu implements Menu {
             return;
         }
         Warp clicked = pageSlice.get(slot);
+        if (starMode) {
+            handleStarToggle(player, clicked);
+            return;
+        }
         revalidateAndAct(player, clicked, click);
     }
 
@@ -111,7 +138,19 @@ public final class WarpListMenu implements Menu {
             case 0 -> {
                 if (page.hasPrevious()) {
                     manager.playClickSound(player);
-                    manager.openWarpList(player, page.index() - 1);
+                    manager.openWarpList(player, starMode, page.index() - 1);
+                }
+            }
+            case 1 -> {
+                if (manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")) {
+                    manager.playClickSound(player);
+                    manager.openFavorites(player, FavoritesMenu.Filter.WARPS, false, 0);
+                }
+            }
+            case 2 -> {
+                if (manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")) {
+                    manager.playClickSound(player);
+                    manager.openWarpList(player, !starMode, page.index());
                 }
             }
             case 5 -> {
@@ -121,12 +160,52 @@ public final class WarpListMenu implements Menu {
             case 8 -> {
                 if (page.hasNext()) {
                     manager.playClickSound(player);
-                    manager.openWarpList(player, page.index() + 1);
+                    manager.openWarpList(player, starMode, page.index() + 1);
                 }
             }
             default -> {
             }
         }
+    }
+
+    private void handleStarToggle(Player player, Warp clicked) {
+        if (manager.favoriteService() == null || !manager.config().favoritesEnabled()) {
+            return;
+        }
+        if (!player.hasPermission("marp.favorites")) {
+            manager.messages().send(player, Messages.NO_PERMISSION);
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        int favLimit = manager.resolveFavoriteLimit(player);
+        int returnPage = page.index();
+        manager.playClickSound(player);
+        manager.favoriteService().toggle(uuid, me.roviczzz.marp.model.FavoriteKind.WARP, clicked.id(), favLimit)
+                .whenComplete((outcome, error) -> manager.scheduler().runOnMain(() -> {
+                    Player online = Bukkit.getPlayer(uuid);
+                    if (online == null || !online.isOnline()) {
+                        return;
+                    }
+                    if (error != null || outcome == null) {
+                        manager.messages().send(online, Messages.STORAGE_ERROR);
+                        return;
+                    }
+                    if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.Added) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_ADDED, Map.of("name", clicked.nameKey()));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.Removed) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_REMOVED, Map.of("name", clicked.nameKey()));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.LimitReached reached) {
+                        manager.messages().send(
+                                online,
+                                Messages.FAVORITES_LIMIT_REACHED,
+                                Map.of("limit", Integer.toString(reached.limit())));
+                    } else if (outcome instanceof me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome.LimitZero) {
+                        manager.messages().send(online, Messages.FAVORITES_LIMIT_ZERO);
+                    }
+                    manager.openWarpList(online, starMode, returnPage);
+                }));
     }
 
     private void revalidateAndAct(Player player, Warp clicked, ClickType click) {

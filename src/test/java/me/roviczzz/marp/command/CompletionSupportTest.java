@@ -64,14 +64,19 @@ class CompletionSupportTest {
 
     @Test
     void marpSubcommandCompletionFiltersByPermission() {
-        Set<String> playerPerms = Set.of("marp.cancel");
+        Set<String> playerPerms = Set.of("marp.cancel", "marp.help");
         assertEquals(
-                List.of("cancel"),
+                List.of("help", "cancel"),
                 CompletionSupport.completeMarpSubcommands("", playerPerms::contains));
 
-        Set<String> adminPerms = Set.of("marp.admin.reload", "marp.cancel", "marp.admin.info");
+        Set<String> adminPerms = Set.of(
+                "marp.help", "marp.cancel", "marp.bedhome.toggle", "marp.admin.info", "marp.admin.reload");
         assertEquals(
-                List.of("reload", "cancel", "info"),
+                List.of("help", "cancel", "bed", "info", "reload"),
                 CompletionSupport.completeMarpSubcommands("", adminPerms::contains));
+
+        assertEquals(
+                List.of("Alice", "Alvin"),
+                CompletionSupport.completeNames(List.of("Bob", "Alvin", "Alice"), "al", 50));
     }
 }

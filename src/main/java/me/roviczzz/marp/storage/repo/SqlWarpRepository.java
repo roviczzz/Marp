@@ -149,10 +149,19 @@ public final class SqlWarpRepository implements WarpRepository {
     @Override
     public CompletableFuture<Boolean> delete(long id) {
         return storage.inTransaction(conn -> {
+            boolean deleted;
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM warps WHERE id = ?")) {
                 ps.setLong(1, id);
-                return ps.executeUpdate() == 1;
+                deleted = ps.executeUpdate() == 1;
             }
+            if (deleted) {
+                try (PreparedStatement favPs = conn.prepareStatement(
+                        "DELETE FROM favorites WHERE target_kind = 'WARP' AND target_id = ?")) {
+                    favPs.setLong(1, id);
+                    favPs.executeUpdate();
+                }
+            }
+            return deleted;
         });
     }
 

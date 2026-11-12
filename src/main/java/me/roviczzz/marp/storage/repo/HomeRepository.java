@@ -21,6 +21,8 @@ public interface HomeRepository {
 
     CompletableFuture<Integer> countByPlayer(UUID player);
 
+    CompletableFuture<Integer> countManualByPlayer(UUID player);
+
     CompletableFuture<Integer> countAll();
 
     /**

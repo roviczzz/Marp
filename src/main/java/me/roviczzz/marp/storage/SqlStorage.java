@@ -9,9 +9,13 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import me.roviczzz.marp.storage.migration.MigrationRunner;
 import me.roviczzz.marp.storage.repo.BackRepository;
+import me.roviczzz.marp.storage.repo.FavoriteRepository;
 import me.roviczzz.marp.storage.repo.HomeRepository;
+import me.roviczzz.marp.storage.repo.PlayerSettingsRepository;
 import me.roviczzz.marp.storage.repo.SqlBackRepository;
+import me.roviczzz.marp.storage.repo.SqlFavoriteRepository;
 import me.roviczzz.marp.storage.repo.SqlHomeRepository;
+import me.roviczzz.marp.storage.repo.SqlPlayerSettingsRepository;
 import me.roviczzz.marp.storage.repo.SqlWarpRepository;
 import me.roviczzz.marp.storage.repo.WarpRepository;
 
@@ -39,6 +43,8 @@ public final class SqlStorage {
     private final HomeRepository homes;
     private final WarpRepository warps;
     private final BackRepository back;
+    private final PlayerSettingsRepository playerSettings;
+    private final FavoriteRepository favorites;
 
     private volatile Connection connection;
 
@@ -62,6 +68,8 @@ public final class SqlStorage {
         this.homes = new SqlHomeRepository(this);
         this.warps = new SqlWarpRepository(this);
         this.back = new SqlBackRepository(this);
+        this.playerSettings = new SqlPlayerSettingsRepository(this);
+        this.favorites = new SqlFavoriteRepository(this);
     }
 
     public CompletableFuture<Void> init() {
@@ -123,6 +131,14 @@ public final class SqlStorage {
 
     public BackRepository back() {
         return back;
+    }
+
+    public PlayerSettingsRepository playerSettings() {
+        return playerSettings;
+    }
+
+    public FavoriteRepository favorites() {
+        return favorites;
     }
 
     public <T> CompletableFuture<T> query(SqlWork<T> work) {

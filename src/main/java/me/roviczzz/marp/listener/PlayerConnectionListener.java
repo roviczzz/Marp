@@ -24,6 +24,7 @@ public final class PlayerConnectionListener implements Listener {
     private final HomeCache homeCache;
     private final BackService backService;
     private final WarmupSampler sampler;
+    private final Consumer<UUID> joinLoadHook;
     private final Consumer<UUID> quitCleanupHook;
 
     public PlayerConnectionListener(
@@ -33,18 +34,33 @@ public final class PlayerConnectionListener implements Listener {
             BackService backService,
             WarmupSampler sampler,
             Consumer<UUID> quitCleanupHook) {
+        this(storageReady, homeService, homeCache, backService, sampler, uuid -> {
+        }, quitCleanupHook);
+    }
+
+    public PlayerConnectionListener(
+            BooleanSupplier storageReady,
+            HomeService homeService,
+            HomeCache homeCache,
+            BackService backService,
+            WarmupSampler sampler,
+            Consumer<UUID> joinLoadHook,
+            Consumer<UUID> quitCleanupHook) {
         this.storageReady = storageReady;
         this.homeService = homeService;
         this.homeCache = homeCache;
         this.backService = backService;
         this.sampler = sampler;
+        this.joinLoadHook = joinLoadHook;
         this.quitCleanupHook = quitCleanupHook;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         if (storageReady.getAsBoolean()) {
-            homeService.loadCache(event.getPlayer().getUniqueId());
+            UUID uuid = event.getPlayer().getUniqueId();
+            homeService.loadCache(uuid);
+            joinLoadHook.accept(uuid);
         }
     }
 

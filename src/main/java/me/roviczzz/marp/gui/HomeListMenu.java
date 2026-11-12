@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import me.roviczzz.marp.config.Messages;
+import me.roviczzz.marp.favorite.FavoriteService.ToggleOutcome;
 import me.roviczzz.marp.gui.MarpMenuHolder.MenuType;
 import me.roviczzz.marp.gui.MarpMenuHolder.TargetKind;
 import me.roviczzz.marp.home.HomeService.SetOutcome;
@@ -25,6 +26,7 @@ public final class HomeListMenu implements Menu {
 
     private final MenuManager manager;
     private final List<Home> allHomes;
+    private final boolean starMode;
     private final Page page;
     private final List<Home> pageSlice;
     private final int limit;
@@ -39,8 +41,19 @@ public final class HomeListMenu implements Menu {
             List<Home> allHomes,
             int requestedPage,
             int limit) {
+        this(manager, owner, allHomes, false, requestedPage, limit);
+    }
+
+    public HomeListMenu(
+            MenuManager manager,
+            UUID owner,
+            List<Home> allHomes,
+            boolean starMode,
+            int requestedPage,
+            int limit) {
         this.manager = manager;
         this.allHomes = List.copyOf(allHomes);
+        this.starMode = starMode;
         this.rows = manager.config().guiRows();
         this.page = Pagination.page(requestedPage, this.allHomes.size(), rows);
         this.pageSlice = this.page.slice(this.allHomes);
@@ -51,7 +64,8 @@ public final class HomeListMenu implements Menu {
         this.inventory = Bukkit.createInventory(
                 holder,
                 rows * 9,
-                manager.messages().component(Messages.GUI_TITLE_HOMES));
+                manager.messages().component(
+                        starMode ? Messages.GUI_TITLE_STAR_MODE : Messages.GUI_TITLE_HOMES));
         this.holder.bind(inventory, this);
     }
 
@@ -63,21 +77,39 @@ public final class HomeListMenu implements Menu {
     private void render(Player player) {
         GuiItemFactory factory = manager.itemFactory();
         for (int i = 0; i < pageSlice.size(); i++) {
-            inventory.setItem(i, factory.homeEntry(pageSlice.get(i)));
+            Home home = pageSlice.get(i);
+            boolean isFav = manager.favoriteService() != null
+                    && manager.favoriteService().isFavorite(holder.owner(), me.roviczzz.marp.model.FavoriteKind.HOME, home.id());
+            inventory.setItem(i, factory.homeEntry(home, isFav));
         }
         if (allHomes.isEmpty()) {
             int emptySlot = Math.min(navBase - 5, 22);
             inventory.setItem(emptySlot, factory.emptyHomesItem());
         }
 
-        boolean canCreate = player.hasPermission("marp.sethome") && allHomes.size() < limit;
+        int usedCount = me.roviczzz.marp.home.HomeService.manualCount(allHomes, manager.config());
+        boolean canCreate = player.hasPermission("marp.sethome") && usedCount < limit;
         inventory.setItem(navBase, factory.previousButton(page));
-        inventory.setItem(navBase + 1, factory.filler());
-        inventory.setItem(navBase + 2, factory.filler());
+        inventory.setItem(
+                navBase + 1,
+                manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")
+                        ? factory.favoritesNavButton()
+                        : factory.filler());
+        inventory.setItem(
+                navBase + 2,
+                manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")
+                        ? factory.starModeButton(starMode)
+                        : factory.filler());
         inventory.setItem(navBase + 3, factory.setHomeButton(canCreate));
-        inventory.setItem(navBase + 4, factory.homePageInfo(page, allHomes.size(), limit));
+        inventory.setItem(navBase + 4, factory.homePageInfo(page, usedCount, limit));
         inventory.setItem(navBase + 5, factory.closeButton());
-        inventory.setItem(navBase + 6, factory.filler());
+        if (manager.settingsService() != null
+                && manager.config().bedHomeEnabled()
+                && player.hasPermission("marp.bedhome.toggle")) {
+            inventory.setItem(navBase + 6, factory.bedToggleButton(!manager.isBedHomeDisabled(holder.owner())));
+        } else {
+            inventory.setItem(navBase + 6, factory.filler());
+        }
         inventory.setItem(navBase + 7, factory.filler());
         inventory.setItem(navBase + 8, factory.nextButton(page));
     }
@@ -105,6 +137,10 @@ public final class HomeListMenu implements Menu {
             return;
         }
         Home clicked = pageSlice.get(slot);
+        if (starMode) {
+            handleStarToggle(player, clicked);
+            return;
+        }
         revalidateAndAct(player, clicked, click);
     }
 
@@ -113,7 +149,19 @@ public final class HomeListMenu implements Menu {
             case 0 -> {
                 if (page.hasPrevious()) {
                     manager.playClickSound(player);
-                    manager.openHomeList(player, page.index() - 1);
+                    manager.openHomeList(player, starMode, page.index() - 1);
+                }
+            }
+            case 1 -> {
+                if (manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")) {
+                    manager.playClickSound(player);
+                    manager.openFavorites(player, FavoritesMenu.Filter.HOMES, false, 0);
+                }
+            }
+            case 2 -> {
+                if (manager.config().favoritesEnabled() && player.hasPermission("marp.favorites")) {
+                    manager.playClickSound(player);
+                    manager.openHomeList(player, !starMode, page.index());
                 }
             }
             case 3 -> handleSetHomeHere(player);
@@ -121,15 +169,84 @@ public final class HomeListMenu implements Menu {
                 manager.playClickSound(player);
                 player.closeInventory();
             }
+            case 6 -> handleBedToggle(player);
             case 8 -> {
                 if (page.hasNext()) {
                     manager.playClickSound(player);
-                    manager.openHomeList(player, page.index() + 1);
+                    manager.openHomeList(player, starMode, page.index() + 1);
                 }
             }
             default -> {
             }
         }
+    }
+
+    private void handleStarToggle(Player player, Home clicked) {
+        if (manager.favoriteService() == null || !manager.config().favoritesEnabled()) {
+            return;
+        }
+        if (!player.hasPermission("marp.favorites")) {
+            manager.messages().send(player, Messages.NO_PERMISSION);
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        int favLimit = manager.resolveFavoriteLimit(player);
+        int returnPage = page.index();
+        manager.playClickSound(player);
+        manager.favoriteService().toggle(uuid, me.roviczzz.marp.model.FavoriteKind.HOME, clicked.id(), favLimit)
+                .whenComplete((outcome, error) -> manager.scheduler().runOnMain(() -> {
+                    Player online = Bukkit.getPlayer(uuid);
+                    if (online == null || !online.isOnline()) {
+                        return;
+                    }
+                    if (error != null || outcome == null) {
+                        manager.messages().send(online, Messages.STORAGE_ERROR);
+                        return;
+                    }
+                    if (outcome instanceof ToggleOutcome.Added) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_ADDED, Map.of("name", clicked.nameKey()));
+                    } else if (outcome instanceof ToggleOutcome.Removed) {
+                        manager.messages().send(
+                                online, Messages.FAVORITES_REMOVED, Map.of("name", clicked.nameKey()));
+                    } else if (outcome instanceof ToggleOutcome.LimitReached reached) {
+                        manager.messages().send(
+                                online,
+                                Messages.FAVORITES_LIMIT_REACHED,
+                                Map.of("limit", Integer.toString(reached.limit())));
+                    } else if (outcome instanceof ToggleOutcome.LimitZero) {
+                        manager.messages().send(online, Messages.FAVORITES_LIMIT_ZERO);
+                    }
+                    manager.openHomeList(online, starMode, returnPage);
+                }));
+    }
+
+    private void handleBedToggle(Player player) {
+        if (manager.settingsService() == null || !manager.config().bedHomeEnabled()) {
+            return;
+        }
+        if (!player.hasPermission("marp.bedhome.toggle")) {
+            manager.messages().send(player, Messages.NO_PERMISSION);
+            return;
+        }
+        UUID uuid = player.getUniqueId();
+        int currentPage = page.index();
+        manager.playClickSound(player);
+        manager.settingsService().toggleBedHome(uuid)
+                .whenComplete((updated, error) -> manager.scheduler().runOnMain(() -> {
+                    Player online = Bukkit.getPlayer(uuid);
+                    if (online == null || !online.isOnline()) {
+                        return;
+                    }
+                    if (error != null || updated == null) {
+                        manager.messages().send(online, Messages.STORAGE_ERROR);
+                        return;
+                    }
+                    manager.messages().send(
+                            online,
+                            updated.bedHomeDisabled() ? Messages.BED_TOGGLE_OFF : Messages.BED_TOGGLE_ON);
+                    manager.openHomeListWithSnapshot(online, allHomes, currentPage);
+                }));
     }
 
     private void handleSetHomeHere(Player player) {
@@ -142,7 +259,7 @@ public final class HomeListMenu implements Menu {
             manager.messages().send(player, Messages.HOME_LIMIT_ZERO);
             return;
         }
-        if (allHomes.size() >= currentLimit) {
+        if (me.roviczzz.marp.home.HomeService.manualCount(allHomes, manager.config()) >= currentLimit) {
             manager.messages().send(
                     player,
                     Messages.HOME_LIMIT_REACHED,
@@ -257,7 +374,7 @@ public final class HomeListMenu implements Menu {
                         manager.playClickSound(online);
                         online.closeInventory();
                         manager.teleportService().requestTeleport(
-                                uuid, TeleportReason.HOME, fresh.nameKey(), fresh.location(), null);
+                                uuid, TeleportReason.HOME, fresh.nameKey(), fresh.location(), null, fresh.isBed());
                     } else if (click.isRightClick()) {
                         if (!online.hasPermission("marp.homes")) {
                             manager.messages().send(online, Messages.NO_PERMISSION);

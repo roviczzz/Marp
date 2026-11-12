@@ -75,6 +75,19 @@ public final class SqlHomeRepository implements HomeRepository {
     }
 
     @Override
+    public CompletableFuture<Integer> countManualByPlayer(UUID player) {
+        return storage.query(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM homes WHERE player_uuid = ? AND is_bed = 0")) {
+                ps.setString(1, player.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getInt(1) : 0;
+                }
+            }
+        });
+    }
+
+    @Override
     public CompletableFuture<Integer> countAll() {
         return storage.query(conn -> {
             try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM homes");
@@ -103,8 +116,9 @@ public final class SqlHomeRepository implements HomeRepository {
                 ps.setBytes(11, home.icon().itemBytes());
                 ps.setString(12, home.displayName());
                 ps.setString(13, encodeLore(home.lore()));
-                ps.setLong(14, home.createdAt());
-                ps.setLong(15, home.updatedAt());
+                ps.setInt(14, home.isBed() ? 1 : 0);
+                ps.setLong(15, home.createdAt());
+                ps.setLong(16, home.updatedAt());
                 ps.executeUpdate();
             }
             return selectByPlayerAndKey(conn, home.owner(), key)
@@ -146,12 +160,21 @@ public final class SqlHomeRepository implements HomeRepository {
     @Override
     public CompletableFuture<Boolean> delete(long id, UUID owner) {
         return storage.inTransaction(conn -> {
+            boolean deleted;
             try (PreparedStatement ps =
                     conn.prepareStatement("DELETE FROM homes WHERE id = ? AND player_uuid = ?")) {
                 ps.setLong(1, id);
                 ps.setString(2, owner.toString());
-                return ps.executeUpdate() == 1;
+                deleted = ps.executeUpdate() == 1;
             }
+            if (deleted) {
+                try (PreparedStatement favPs = conn.prepareStatement(
+                        "DELETE FROM favorites WHERE target_kind = 'HOME' AND target_id = ?")) {
+                    favPs.setLong(1, id);
+                    favPs.executeUpdate();
+                }
+            }
+            return deleted;
         });
     }
 
@@ -184,6 +207,7 @@ public final class SqlHomeRepository implements HomeRepository {
                 icon,
                 rs.getString("display_name"),
                 decodeLore(rs.getString("lore")),
+                rs.getInt("is_bed") != 0,
                 rs.getLong("rev"),
                 rs.getLong("created_at"),
                 rs.getLong("updated_at"));

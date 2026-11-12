@@ -162,6 +162,87 @@ class TeleportPipelineTest {
         assertTrue(env.messagesSent.isEmpty(), "Disconnected player should receive no message: " + env.messagesSent);
     }
 
+    @Test
+    void tpaFollowsLiveAnchorLocationAndBindsRulesToMoverNotAnchor() {
+        FakeTeleportEnv env = new FakeTeleportEnv();
+        env.yaml.set("teleport.warmup.tpa", 2);
+        env.yaml.set("teleport.cooldown.tpa", 15);
+        UUID anchor = UUID.randomUUID();
+        env.addExtraPlayer(anchor, TARGET_A);
+
+        // Mover starts TPA to anchor; anchor walks to TARGET_B during mover's 2s warmup without cancelling mover.
+        CompletableFuture<Outcome> tpaFuture = env.service.requestTpaTeleport(
+                PLAYER, anchor, "Bob", TARGET_A);
+        for (int i = 0; i < 5; i++) {
+            env.sampler.tick(4);
+        }
+        assertFalse(tpaFuture.isDone());
+        env.extraLocations.put(anchor, TARGET_B);
+        for (int i = 0; i < 5; i++) {
+            env.sampler.tick(4);
+        }
+
+        Outcome arrived = assertInstanceOf(Outcome.Teleported.class, tpaFuture.join());
+        assertEquals(TARGET_B, ((Outcome.Teleported) arrived).destination());
+        assertEquals(TARGET_B, env.playerLocation);
+        // Cooldown applied to mover only, not anchor; /back recorded for mover only.
+        assertEquals(15L, env.cooldowns.remainingSeconds(PLAYER, TeleportReason.TPA, false));
+        assertEquals(0L, env.cooldowns.remainingSeconds(anchor, TeleportReason.TPA, false));
+        assertEquals(ORIGIN, env.backService.resolve(PLAYER).join().orElseThrow().location());
+    }
+
+    @Test
+    void tpaCancelsWhenAnchorDiesOrLeavesDisallowedWorldDuringWarmup() {
+        FakeTeleportEnv env = new FakeTeleportEnv();
+        env.yaml.set("teleport.warmup.tpa", 2);
+        UUID anchor = UUID.randomUUID();
+        env.addExtraPlayer(anchor, TARGET_A);
+
+        CompletableFuture<Outcome> diedFuture = env.service.requestTpaTeleport(
+                PLAYER, anchor, "Bob", TARGET_A);
+        env.extraDead.put(anchor, true);
+        env.sampler.onDeath(anchor);
+        assertEquals(new Outcome.Cancelled(CancelReason.TARGET_DIED), diedFuture.join());
+        assertTrue(env.messagesSent.contains(Messages.TPA_TARGET_DIED));
+        assertEquals(0L, env.cooldowns.remainingSeconds(PLAYER, TeleportReason.TPA, false));
+
+        // Cross-world disabled: anchor moves to world_nether -> mover cancelled immediately.
+        env.messagesSent.clear();
+        env.extraDead.put(anchor, false);
+        env.yaml.set("tpa.cross-world", false);
+        CompletableFuture<Outcome> worldFuture = env.service.requestTpaTeleport(
+                PLAYER, anchor, "Bob", TARGET_A);
+        env.extraLocations.put(anchor, new LocationSnapshot("world_nether", 5, 64, 5, 0, 0));
+        env.sampler.onAnchorWorldChange(anchor, "world_nether");
+        assertEquals(new Outcome.Cancelled(CancelReason.CROSS_WORLD), worldFuture.join());
+        assertTrue(env.messagesSent.contains(Messages.CROSS_WORLD_DISABLED));
+    }
+
+    @Test
+    void bedValidationRespectsRequireValidBedFlag() {
+        FakeTeleportEnv env = new FakeTeleportEnv();
+        env.yaml.set("teleport.warmup.home", 0);
+        env.bedRespawnValid = false;
+
+        // Default require-valid-bed = false -> succeeds even when bedRespawnValid is false.
+        Outcome snapshotOk = env.service.requestTeleport(
+                PLAYER, TeleportReason.HOME, "bed", TARGET_A, null, true).join();
+        assertInstanceOf(Outcome.Teleported.class, snapshotOk);
+
+        // Strict require-valid-bed = true -> rejected with BED_MISSING_OR_OBSTRUCTED.
+        env.cooldowns.clearAll();
+        env.yaml.set("bed-home.require-valid-bed", true);
+        Outcome strictFail = env.service.requestTeleport(
+                PLAYER, TeleportReason.HOME, "bed", TARGET_A, null, true).join();
+        assertInstanceOf(Outcome.Unsafe.class, strictFail);
+        assertTrue(env.messagesSent.contains(Messages.BED_MISSING_OR_OBSTRUCTED));
+
+        env.bedRespawnValid = true;
+        Outcome strictOk = env.service.requestTeleport(
+                PLAYER, TeleportReason.HOME, "bed", TARGET_A, null, true).join();
+        assertInstanceOf(Outcome.Teleported.class, strictOk);
+    }
+
     private static final class FakeTeleportEnv implements TeleportPlatform, PlayerStateProvider {
         final YamlConfiguration yaml = new YamlConfiguration();
         final AtomicLong clock = new AtomicLong(1_000L);
@@ -181,7 +262,15 @@ class TeleportPipelineTest {
         boolean bypassWarmup;
         boolean bypassSafety;
         boolean teleportSucceeded = true;
+        boolean bedRespawnValid = true;
         SafetyResult nextSafetyResult;
+        final Map<UUID, LocationSnapshot> extraLocations = new HashMap<>();
+        final Map<UUID, Boolean> extraDead = new HashMap<>();
+
+        void addExtraPlayer(UUID uuid, LocationSnapshot loc) {
+            extraLocations.put(uuid, loc);
+            extraDead.put(uuid, false);
+        }
 
         FakeTeleportEnv() {
             this.service = new TeleportService(
@@ -206,11 +295,23 @@ class TeleportPipelineTest {
 
         @Override
         public Optional<PlayerContext> player(UUID uuid) {
-            if (!online || !uuid.equals(PLAYER)) {
+            if (uuid.equals(PLAYER)) {
+                if (!online) {
+                    return Optional.empty();
+                }
+                return Optional.of(new PlayerContext(
+                        PLAYER, playerLocation, bypassCooldown, bypassWarmup, bypassSafety));
+            }
+            LocationSnapshot extraLoc = extraLocations.get(uuid);
+            if (extraLoc == null || Boolean.TRUE.equals(extraDead.get(uuid))) {
                 return Optional.empty();
             }
-            return Optional.of(new PlayerContext(
-                    PLAYER, playerLocation, bypassCooldown, bypassWarmup, bypassSafety));
+            return Optional.of(new PlayerContext(uuid, extraLoc, false, false, false));
+        }
+
+        @Override
+        public boolean isPlayerDead(UUID uuid) {
+            return Boolean.TRUE.equals(extraDead.get(uuid));
         }
 
         @Override
@@ -222,6 +323,11 @@ class TeleportPipelineTest {
         public CompletableFuture<SafetyResult> evaluateSafety(LocationSnapshot target, MarpConfig config) {
             SafetyResult result = nextSafetyResult != null ? nextSafetyResult : new SafetyResult.Safe(target);
             return CompletableFuture.completedFuture(result);
+        }
+
+        @Override
+        public CompletableFuture<Boolean> validateBedRespawn(UUID playerUuid, LocationSnapshot target) {
+            return CompletableFuture.completedFuture(bedRespawnValid);
         }
 
         @Override
@@ -266,10 +372,18 @@ class TeleportPipelineTest {
 
         @Override
         public Optional<PlayerSample> sample(UUID uuid) {
-            if (!online || !uuid.equals(PLAYER)) {
+            if (uuid.equals(PLAYER)) {
+                if (!online) {
+                    return Optional.empty();
+                }
+                return Optional.of(new PlayerSample(PLAYER, playerLocation, onGround, feetMaterial, false));
+            }
+            LocationSnapshot extraLoc = extraLocations.get(uuid);
+            if (extraLoc == null) {
                 return Optional.empty();
             }
-            return Optional.of(new PlayerSample(PLAYER, playerLocation, onGround, feetMaterial, false));
+            return Optional.of(new PlayerSample(
+                    uuid, extraLoc, true, "STONE", Boolean.TRUE.equals(extraDead.get(uuid))));
         }
     }
 

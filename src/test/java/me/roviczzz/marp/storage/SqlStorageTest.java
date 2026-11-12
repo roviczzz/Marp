@@ -17,13 +17,19 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import me.roviczzz.marp.favorite.FavoriteCache;
 import me.roviczzz.marp.model.BackEntry;
 import me.roviczzz.marp.model.BackKind;
+import me.roviczzz.marp.model.FavoriteEntry;
+import me.roviczzz.marp.model.FavoriteKind;
 import me.roviczzz.marp.model.Home;
 import me.roviczzz.marp.model.IconSpec;
 import me.roviczzz.marp.model.LocationSnapshot;
+import me.roviczzz.marp.model.PlayerSettings;
 import me.roviczzz.marp.model.Warp;
+import me.roviczzz.marp.settings.PlayerSettingsService;
 import me.roviczzz.marp.storage.migration.MigrationRunner;
+import me.roviczzz.marp.storage.migration.V1InitialSchema;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -75,7 +81,7 @@ class SqlStorageTest {
             assertEquals("wal", journalMode.toLowerCase());
 
             int version = storage.query(MigrationRunner::readVersion).join();
-            assertEquals(1, version);
+            assertEquals(2, version);
 
             List<String> tables = storage.query(conn -> {
                 try (Statement stmt = conn.createStatement();
@@ -88,25 +94,53 @@ class SqlStorageTest {
                     return names;
                 }
             }).join();
-            assertTrue(tables.containsAll(List.of("marp_schema", "homes", "warps", "back_locations")));
+            assertTrue(tables.containsAll(List.of(
+                    "marp_schema", "homes", "warps", "back_locations", "player_settings", "favorites")));
+
+            List<String> indexes = storage.query(conn -> {
+                try (Statement stmt = conn.createStatement();
+                        ResultSet rs = stmt.executeQuery(
+                                "SELECT name FROM sqlite_master WHERE type = 'index'")) {
+                    java.util.ArrayList<String> names = new java.util.ArrayList<>();
+                    while (rs.next()) {
+                        names.add(rs.getString(1));
+                    }
+                    return names;
+                }
+            }).join();
+            assertTrue(indexes.contains("idx_favorites_target"));
         } finally {
             assertTrue(storage.shutdown(Duration.ofSeconds(5)));
         }
     }
 
     @Test
-    void migrationRunnerUpgradesV0AndRefusesNewerSchema() throws Exception {
+    void migrationRunnerUpgradesV1ToV2AndRefusesNewerSchema() throws Exception {
         Path dbFile = tempDir.resolve("migrate.db");
+        UUID owner = UUID.randomUUID();
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile);
                 Statement stmt = conn.createStatement()) {
-            stmt.execute("CREATE TABLE marp_schema (version INTEGER NOT NULL)");
-            stmt.execute("INSERT INTO marp_schema (version) VALUES (0)");
-            assertEquals(1, MigrationRunner.standard().migrate(conn));
+            new MigrationRunner(List.of(new V1InitialSchema())).migrate(conn);
             assertEquals(1, MigrationRunner.readVersion(conn));
+            stmt.execute("""
+                    INSERT INTO homes (
+                        player_uuid, name, name_key, world, x, y, z, yaw, pitch,
+                        icon_material, rev, created_at, updated_at
+                    ) VALUES ('%s', 'base', 'base', 'world', 1, 64, 1, 0, 0, 'GRASS_BLOCK', 0, 10, 10)
+                    """.formatted(owner));
 
-            stmt.execute("UPDATE marp_schema SET version = 2");
-            assertThrows(StorageException.class, () -> MigrationRunner.standard().migrate(conn));
+            assertEquals(2, MigrationRunner.standard().migrate(conn));
             assertEquals(2, MigrationRunner.readVersion(conn));
+
+            try (ResultSet rs = stmt.executeQuery("SELECT name_key, is_bed FROM homes WHERE player_uuid = '" + owner + "'")) {
+                assertTrue(rs.next());
+                assertEquals("base", rs.getString("name_key"));
+                assertEquals(0, rs.getInt("is_bed"));
+            }
+
+            stmt.execute("UPDATE marp_schema SET version = 3");
+            assertThrows(StorageException.class, () -> MigrationRunner.standard().migrate(conn));
+            assertEquals(3, MigrationRunner.readVersion(conn));
         }
 
         // SqlStorage.init must also fail cleanly on the newer file and close the connection.
@@ -270,6 +304,84 @@ class SqlStorageTest {
             assertTrue(storage.back().find(player, BackKind.TELEPORT).join().isPresent());
         } finally {
             storage.shutdown(Duration.ofSeconds(5));
+        }
+    }
+
+    @Test
+    void bedHomeCountAndTransactionalFavoriteCleanupAndSettingsPersistence() {
+        Path dbFile = tempDir.resolve("v2features.db");
+        UUID player = UUID.randomUUID();
+        UUID other = UUID.randomUUID();
+        LocationSnapshot loc = new LocationSnapshot("world", 10, 64, 10, 0, 0);
+
+        long homeId;
+        long warpId;
+        SqlStorage storage = new SqlStorage(dbFile, 5000, true);
+        try {
+            storage.init().join();
+
+            Home manual = storage.homes().insert(new Home(
+                    0L, player, "base", "base", loc, IconSpec.material("GRASS_BLOCK"), null, List.of(), false, 0L, 10L, 10L)).join();
+            Home bed = storage.homes().insert(new Home(
+                    0L, player, "bed", "bed", loc, IconSpec.material("RED_BED"), null, List.of(), true, 0L, 20L, 20L)).join();
+            Home movedBed = storage.homes().insert(new Home(
+                    0L, player, "bed", "bed", new LocationSnapshot("world", 20, 64, 20, 0, 0),
+                    IconSpec.material("WHITE_BED"), null, List.of(), true, 0L, 30L, 30L)).join();
+            assertTrue(movedBed.isBed());
+            assertEquals(bed.id(), movedBed.id());
+            assertEquals(2, storage.homes().countByPlayer(player).join());
+            assertEquals(1, storage.homes().countManualByPlayer(player).join());
+
+            Warp spawn = storage.warps().insert(new Warp(
+                    0L, "spawn", "spawn", loc, IconSpec.material("ENDER_PEARL"), null, List.of(), null, player, 0L, 10L, 10L)).join();
+            homeId = manual.id();
+            warpId = spawn.id();
+
+            FavoriteEntry f1 = storage.favorites().add(player, FavoriteKind.HOME, homeId, 100L).join();
+            FavoriteEntry dup = storage.favorites().add(player, FavoriteKind.HOME, homeId, 150L).join();
+            assertEquals(f1.sortOrder(), dup.sortOrder());
+            FavoriteEntry f2 = storage.favorites().add(player, FavoriteKind.WARP, warpId, 200L).join();
+            storage.favorites().add(other, FavoriteKind.WARP, warpId, 300L).join();
+            assertEquals(0, f1.sortOrder());
+            assertEquals(1, f2.sortOrder());
+            assertEquals(2, storage.favorites().countByPlayer(player).join());
+
+            // Deleting home or warp removes its favorite mappings in the same transaction.
+            assertTrue(storage.homes().delete(homeId, player).join());
+            assertEquals(1, storage.favorites().countByPlayer(player).join());
+            assertTrue(storage.warps().delete(warpId).join());
+            assertEquals(0, storage.favorites().countByPlayer(player).join());
+            assertEquals(0, storage.favorites().countByPlayer(other).join());
+
+            // PlayerSettingsService toggles and persists across restart.
+            PlayerSettingsService settingsService = new PlayerSettingsService(storage.playerSettings(), () -> 500L);
+            PlayerSettings toggled = settingsService.toggleTpa(player).join();
+            assertTrue(toggled.tpaDisabled());
+            assertFalse(toggled.bedHomeDisabled());
+            PlayerSettings both = settingsService.setBedHomeDisabled(player, true).join();
+            assertTrue(both.tpaDisabled());
+            assertTrue(both.bedHomeDisabled());
+        } finally {
+            storage.shutdown(Duration.ofSeconds(5));
+        }
+
+        // Reopen database and confirm persisted settings and FavoriteCache.
+        SqlStorage reopened = new SqlStorage(dbFile, 5000, true);
+        try {
+            reopened.init().join();
+            PlayerSettingsService reloadedService = new PlayerSettingsService(reopened.playerSettings(), () -> 900L);
+            PlayerSettings loaded = reloadedService.load(player).join();
+            assertTrue(loaded.tpaDisabled());
+            assertTrue(loaded.bedHomeDisabled());
+
+            FavoriteCache favCache = new FavoriteCache();
+            FavoriteEntry e = new FavoriteEntry(player, FavoriteKind.HOME, 99L, 0, 10L);
+            favCache.putAll(player, List.of(e));
+            assertTrue(favCache.isFavorite(player, FavoriteKind.HOME, 99L));
+            favCache.removeTargetEverywhere(FavoriteKind.HOME, 99L);
+            assertFalse(favCache.isFavorite(player, FavoriteKind.HOME, 99L));
+        } finally {
+            reopened.shutdown(Duration.ofSeconds(5));
         }
     }
 }

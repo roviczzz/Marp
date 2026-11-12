@@ -25,9 +25,17 @@ public interface TeleportPlatform {
 
     Optional<PlayerContext> player(UUID uuid);
 
+    default boolean isPlayerDead(UUID uuid) {
+        return false;
+    }
+
     boolean isWorldLoaded(String worldName);
 
     CompletableFuture<SafetyResult> evaluateSafety(LocationSnapshot target, MarpConfig config);
+
+    default CompletableFuture<Boolean> validateBedRespawn(UUID playerUuid, LocationSnapshot target) {
+        return CompletableFuture.completedFuture(true);
+    }
 
     void preparePlayerForArrival(UUID uuid, MarpConfig config);
 

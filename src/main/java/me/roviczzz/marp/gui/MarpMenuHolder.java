@@ -16,12 +16,14 @@ public final class MarpMenuHolder implements InventoryHolder {
         HOME_LIST,
         WARP_LIST,
         ENTRY_EDIT,
-        DELETE_CONFIRM
+        DELETE_CONFIRM,
+        FAVORITES
     }
 
     public enum TargetKind {
         HOME,
-        WARP
+        WARP,
+        MIXED
     }
 
     private final MenuType menuType;

@@ -274,6 +274,16 @@ class ListenerAndMenuTest {
         assertEquals(List.of(0), clickedSlots);
     }
 
+    @Test
+    void favoritesMenuAndStarModeHolderPreserveIdentity() {
+        UUID owner = UUID.randomUUID();
+        MarpMenuHolder favHolder = new MarpMenuHolder(
+                MenuType.FAVORITES, TargetKind.MIXED, owner, 0, 0L, 0L);
+        assertEquals(MenuType.FAVORITES, favHolder.menuType());
+        assertEquals(TargetKind.MIXED, favHolder.targetKind());
+        assertEquals(owner, favHolder.owner());
+    }
+
     private static final class DamageSourceProxy {
         static org.bukkit.damage.DamageSource none() {
             return (org.bukkit.damage.DamageSource) Proxy.newProxyInstance(

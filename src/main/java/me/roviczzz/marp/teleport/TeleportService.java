@@ -92,8 +92,30 @@ public final class TeleportService {
             String targetName,
             LocationSnapshot rawTarget,
             BackKind backKind) {
+        return requestTeleport(playerUuid, reason, targetName, rawTarget, backKind, false);
+    }
+
+    public CompletableFuture<Outcome> requestTeleport(
+            UUID playerUuid,
+            TeleportReason reason,
+            String targetName,
+            LocationSnapshot rawTarget,
+            BackKind backKind,
+            boolean requireValidBed) {
         CompletableFuture<Outcome> result = new CompletableFuture<>();
-        scheduler.runOnMain(() -> startOnMain(playerUuid, reason, targetName, rawTarget, backKind, result));
+        scheduler.runOnMain(() -> startOnMain(
+                playerUuid, reason, targetName, rawTarget, backKind, null, requireValidBed, result));
+        return result;
+    }
+
+    public CompletableFuture<Outcome> requestTpaTeleport(
+            UUID moverUuid,
+            UUID anchorUuid,
+            String anchorName,
+            LocationSnapshot initialAnchorTarget) {
+        CompletableFuture<Outcome> result = new CompletableFuture<>();
+        scheduler.runOnMain(() -> startOnMain(
+                moverUuid, TeleportReason.TPA, anchorName, initialAnchorTarget, null, anchorUuid, false, result));
         return result;
     }
 
@@ -103,6 +125,8 @@ public final class TeleportService {
             String targetName,
             LocationSnapshot rawTarget,
             BackKind backKind,
+            UUID anchorUuid,
+            boolean requireValidBed,
             CompletableFuture<Outcome> outerFuture) {
         Optional<PlayerContext> ctxOpt = platform.player(playerUuid);
         if (ctxOpt.isEmpty()) {
@@ -115,7 +139,8 @@ public final class TeleportService {
         // Cross-world check
         if (!ctx.location().world().equals(rawTarget.world())) {
             if ((reason == TeleportReason.HOME && !cfg.homesCrossWorld())
-                    || (reason == TeleportReason.BACK && !cfg.backCrossWorld())) {
+                    || (reason == TeleportReason.BACK && !cfg.backCrossWorld())
+                    || (reason == TeleportReason.TPA && !cfg.tpaCrossWorld())) {
                 platform.sendMessage(playerUuid, Messages.CROSS_WORLD_DISABLED, Map.of());
                 outerFuture.complete(new Outcome.CrossWorldDisabled());
                 return;
@@ -155,7 +180,15 @@ public final class TeleportService {
         }
 
         TeleportSession session = sessions.start(
-                playerUuid, reason, targetName, ctx.location(), rawTarget, backKind, warmupSeconds);
+                playerUuid,
+                reason,
+                targetName,
+                ctx.location(),
+                rawTarget,
+                backKind,
+                warmupSeconds,
+                anchorUuid,
+                requireValidBed);
         session.completion().whenComplete((outcome, error) -> {
             if (error != null) {
                 outerFuture.completeExceptionally(error);
@@ -164,7 +197,7 @@ public final class TeleportService {
             }
         });
 
-        evaluateWithFallback(playerUuid, reason, rawTarget, ctx.bypassSafety(), cfg, true)
+        evaluateWithFallback(playerUuid, reason, rawTarget, ctx.bypassSafety(), cfg, true, requireValidBed)
                 .whenComplete((decision, error) -> scheduler.runOnMain(() -> {
                     if (!sessions.isCurrent(session)) {
                         return;
@@ -225,8 +258,50 @@ public final class TeleportService {
             PlayerContext ctx = ctxOpt.get();
             MarpConfig cfg = config.get();
 
+            // For TPA, re-resolve the anchor player's live location at arrival.
+            if (session.anchorPlayer() != null) {
+                UUID anchorUuid = session.anchorPlayer();
+                Optional<PlayerContext> anchorOpt = platform.player(anchorUuid);
+                if (anchorOpt.isEmpty()) {
+                    sessions.removeIfMatch(session);
+                    platform.clearActionBar(playerUuid);
+                    CancelReason cancelReason = platform.isPlayerDead(anchorUuid)
+                            ? CancelReason.TARGET_DIED
+                            : CancelReason.TARGET_OFFLINE;
+                    String msgKey = cancelReason.messageKey();
+                    if (msgKey != null) {
+                        platform.sendMessage(playerUuid, msgKey, Map.of("player", session.targetName()));
+                    }
+                    session.completion().complete(new Outcome.Cancelled(cancelReason));
+                    return;
+                }
+                LocationSnapshot liveAnchor = anchorOpt.get().location();
+                if (!cfg.tpaCrossWorld() && !ctx.location().world().equals(liveAnchor.world())) {
+                    sessions.removeIfMatch(session);
+                    platform.clearActionBar(playerUuid);
+                    platform.sendMessage(playerUuid, Messages.CROSS_WORLD_DISABLED, Map.of());
+                    session.completion().complete(new Outcome.CrossWorldDisabled());
+                    return;
+                }
+                if (!platform.isWorldLoaded(liveAnchor.world())) {
+                    sessions.removeIfMatch(session);
+                    platform.clearActionBar(playerUuid);
+                    platform.sendMessage(playerUuid, Messages.WORLD_MISSING, Map.of("world", liveAnchor.world()));
+                    session.completion().complete(new Outcome.WorldMissing(liveAnchor.world()));
+                    return;
+                }
+                session.resetTargetForArrival(liveAnchor);
+            }
+
             // Final safety re-check: chunks or blocks may have changed during warmup.
-            evaluateWithFallback(playerUuid, session.reason(), session.target(), ctx.bypassSafety(), cfg, false)
+            evaluateWithFallback(
+                    playerUuid,
+                    session.reason(),
+                    session.target(),
+                    ctx.bypassSafety(),
+                    cfg,
+                    false,
+                    session.requireValidBed())
                     .whenComplete((decision, error) -> scheduler.runOnMain(() -> {
                         if (!sessions.isCurrent(session)) {
                             return;
@@ -311,12 +386,21 @@ public final class TeleportService {
             LocationSnapshot target,
             boolean bypassSafety,
             MarpConfig cfg,
-            boolean allowBackFallback) {
-        if (bypassSafety || !cfg.safetyEnabled()) {
-            return CompletableFuture.completedFuture(
-                    new SafetyDecision.Proceed(target, false, null, false));
-        }
-        return platform.evaluateSafety(target, cfg).thenCompose(result -> {
+            boolean allowBackFallback,
+            boolean requireValidBed) {
+        CompletableFuture<Boolean> bedCheck = (requireValidBed && cfg.bedHomeRequireValidBed())
+                ? platform.validateBedRespawn(playerUuid, target)
+                : CompletableFuture.completedFuture(true);
+        return bedCheck.thenCompose(bedOk -> {
+            if (!Boolean.TRUE.equals(bedOk)) {
+                return CompletableFuture.completedFuture(new SafetyDecision.Rejected(
+                        "bed", Messages.BED_MISSING_OR_OBSTRUCTED, Map.of()));
+            }
+            if (bypassSafety || !cfg.safetyEnabled()) {
+                return CompletableFuture.completedFuture(
+                        new SafetyDecision.Proceed(target, false, null, false));
+            }
+            return platform.evaluateSafety(target, cfg).thenCompose(result -> {
             if (result instanceof SafetyResult.Safe safe) {
                 return CompletableFuture.completedFuture(
                         new SafetyDecision.Proceed(safe.location(), false, null, false));
@@ -353,6 +437,7 @@ public final class TeleportService {
 
             return CompletableFuture.completedFuture(rejectForUnsafe(unsafe.reason(), cfg));
         });
+        });
     }
 
     private static SafetyDecision.Rejected rejectForUnsafe(String reasonCode, MarpConfig cfg) {
@@ -371,6 +456,7 @@ public final class TeleportService {
             case HOME -> cfg.warmupHomeSeconds();
             case WARP -> cfg.warmupWarpSeconds();
             case BACK -> cfg.warmupBackSeconds();
+            case TPA -> cfg.warmupTpaSeconds();
         };
     }
 
@@ -379,6 +465,7 @@ public final class TeleportService {
             case HOME -> cfg.cooldownHomeSeconds();
             case WARP -> cfg.cooldownWarpSeconds();
             case BACK -> cfg.cooldownBackSeconds();
+            case TPA -> cfg.cooldownTpaSeconds();
         };
     }
 }

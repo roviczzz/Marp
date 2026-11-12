@@ -18,6 +18,8 @@ class MarpConfigTest {
         yaml.set("back.prefer", "weird");
         yaml.set("back.unreachable-fallback", "???");
         yaml.set("homes.max-limit-node-scan", 0);
+        yaml.set("favorites.home-no-arg-priority", "RANDOM");
+        yaml.set("help.entries-per-page", 0);
         return new MarpConfig(yaml, warnings::add);
     }
 
@@ -29,10 +31,13 @@ class MarpConfigTest {
         assertEquals(MarpConfig.SafetyMode.SEARCH, config.safetyMode());
         assertEquals(MarpConfig.BackPreference.NEWEST, config.backPreference());
         assertEquals(MarpConfig.UnreachableFallback.LAST_GROUND, config.unreachableFallback());
+        assertEquals(MarpConfig.HomeNoArgPriority.DEFAULT_FIRST, config.homeNoArgPriority());
         assertEquals(3, config.guiRows());
         assertEquals(1, config.maxLimitNodeScan());
+        assertEquals(1, config.helpEntriesPerPage());
         assertFalse(warnings.isEmpty());
         assertTrue(warnings.stream().anyMatch(message -> message.contains("teleport.safety.mode")));
+        assertTrue(warnings.stream().anyMatch(message -> message.contains("favorites.home-no-arg-priority")));
     }
 
     @Test
@@ -58,5 +63,15 @@ class MarpConfigTest {
         assertEquals("NEWEST", config.backPreference().name());
         assertTrue(config.hazardMaterials().contains("LAVA"));
         assertTrue(config.ignoredDamageCauses().contains("POISON"));
+        assertTrue(config.tpaEnabled());
+        assertEquals(60, config.tpaRequestTimeoutSeconds());
+        assertEquals(3, config.warmupTpaSeconds());
+        assertEquals(15, config.cooldownTpaSeconds());
+        assertTrue(config.bedHomeEnabled());
+        assertEquals("bed", config.bedHomeName());
+        assertFalse(config.bedHomeCountsTowardLimit());
+        assertTrue(config.favoritesEnabled());
+        assertEquals(9, config.favoritesDefaultLimit());
+        assertEquals(7, config.helpEntriesPerPage());
     }
 }

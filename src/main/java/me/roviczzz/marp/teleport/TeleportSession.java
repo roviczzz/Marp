@@ -21,6 +21,9 @@ public final class TeleportSession {
         COMMAND(Messages.TELEPORT_COMMAND),
         TELEPORTED_ELSEWHERE(Messages.TELEPORT_TELEPORTED_ELSEWHERE),
         EXPLICIT(Messages.CANCELLED),
+        TARGET_OFFLINE(Messages.TPA_TARGET_OFFLINE),
+        TARGET_DIED(Messages.TPA_TARGET_DIED),
+        CROSS_WORLD(Messages.CROSS_WORLD_DISABLED),
         SILENT(null);
 
         private final String messageKey;
@@ -40,6 +43,8 @@ public final class TeleportSession {
     private final String targetName;
     private final LocationSnapshot origin;
     private final BackKind backKind;
+    private final UUID anchorPlayer;
+    private final boolean requireValidBed;
     private final CompletableFuture<TeleportService.Outcome> completion = new CompletableFuture<>();
 
     private volatile LocationSnapshot target;
@@ -59,6 +64,33 @@ public final class TeleportSession {
             LocationSnapshot target,
             BackKind backKind,
             int warmupSeconds) {
+        this(token, player, reason, targetName, origin, target, backKind, warmupSeconds, null);
+    }
+
+    public TeleportSession(
+            long token,
+            UUID player,
+            TeleportReason reason,
+            String targetName,
+            LocationSnapshot origin,
+            LocationSnapshot target,
+            BackKind backKind,
+            int warmupSeconds,
+            UUID anchorPlayer) {
+        this(token, player, reason, targetName, origin, target, backKind, warmupSeconds, anchorPlayer, false);
+    }
+
+    public TeleportSession(
+            long token,
+            UUID player,
+            TeleportReason reason,
+            String targetName,
+            LocationSnapshot origin,
+            LocationSnapshot target,
+            BackKind backKind,
+            int warmupSeconds,
+            UUID anchorPlayer,
+            boolean requireValidBed) {
         this.token = token;
         this.player = player;
         this.reason = reason;
@@ -66,6 +98,8 @@ public final class TeleportSession {
         this.origin = origin;
         this.target = target;
         this.backKind = backKind;
+        this.anchorPlayer = anchorPlayer;
+        this.requireValidBed = requireValidBed;
         this.remainingSeconds = Math.max(0, warmupSeconds);
     }
 
@@ -100,12 +134,25 @@ public final class TeleportSession {
         }
     }
 
+    public void resetTargetForArrival(LocationSnapshot target) {
+        this.target = target;
+        this.adjusted = false;
+    }
+
     public boolean adjusted() {
         return adjusted;
     }
 
     public BackKind backKind() {
         return backKind;
+    }
+
+    public UUID anchorPlayer() {
+        return anchorPlayer;
+    }
+
+    public boolean requireValidBed() {
+        return requireValidBed;
     }
 
     public int remainingSeconds() {
